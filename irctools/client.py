@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import random
+import signal
 import ssl
 import time
 
@@ -110,6 +111,8 @@ class Bot:
         self.started, self.since = time.time(), None   # the program's start; connected since (None: not now)
         self._status = None                             # (path, every, options) from status_file()
         self._q_state, self._q_gen = '', 0
+        self._writer = self._wake = self._done = None
+        self.reconnect_delay = 5                        # the first wait before reconnecting, doubling to 300 s
         self.q = None
         self._last_rx = 0.0
 
@@ -172,15 +175,20 @@ class Bot:
                 b[k] = v
         return b
 
-    def status_file(self, path, every=30, title=None, **options):
+    def status_file(self, path, every=30, title=None, mode=0o644, **options):
         """Write status.json for webstatus's page every so many seconds while running (and when stopping).
-        options: hide=[...], network=..., version=..., note=... (as status())."""
-        self._status = (path, every, title, options)
+        options: hide=[...], network=..., version=..., note=... (as status()).
+        mode: the file's permissions. 0o644 lets a web server running as another user read it (the file is meant
+        to be public); use 0o640 with a shared group, or 0o600 when the server runs as the bot's own user, if the
+        folder is somewhere other users of the machine can look."""
+        self._status = (path, every, title, dict(options, _mode=mode))
 
     def write_status(self):
         if not self._status:
             return
         path, _, title, options = self._status
+        options = dict(options)
+        mode = options.pop('_mode', 0o644)
         data = {'format': 1, 'updated': int(time.time()), 'bots': [self.status(**options)]}
         if title:
             data['title'] = title
@@ -190,7 +198,7 @@ class Bot:
             os.makedirs(folder, exist_ok=True)
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False)
-            os.chmod(tmp, 0o644)
+            os.chmod(tmp, mode)
             os.replace(tmp, path)                       # the page never reads half a file
         except OSError as e:
             log.warning('could not write %s: %s', path, e)
@@ -202,20 +210,59 @@ class Bot:
 
     # ---- running ----
     def run(self):
-        """Connect, and stay connected until stop() (or Ctrl-C)."""
+        """Connect, and stay connected until stop(), Ctrl-C or SIGTERM (both end with a QUIT, as stop() does)."""
+        async def main():
+            loop = asyncio.get_event_loop()
+            for sig in ('SIGINT', 'SIGTERM'):
+                try:
+                    loop.add_signal_handler(getattr(signal, sig), self.stop, 'Shutting down')
+                except (NotImplementedError, AttributeError, RuntimeError):
+                    pass                                  # Windows: Ctrl-C still ends it below
+            await self.run_forever()
         try:
-            asyncio.run(self.run_forever())
+            asyncio.run(main())
         except KeyboardInterrupt:
             pass
 
-    def stop(self, reason='Bye'):
+    def stop(self, reason='Bye', wait=5):
+        """Leave IRC: send QUIT, and close the connection ourselves if the server has not within wait seconds.
+        A reconnect wait in progress ends at once. Call it from the bot's own event loop (a command, a handler);
+        from another thread use loop.call_soon_threadsafe(bot.stop). To wait until it is all over: await
+        bot.shutdown()."""
         self.running = False
-        if self.q is not None:
+        if self._wake is not None:
+            self._wake.set()                              # no more reconnect waits
+        if self.q is not None and self._writer is not None:
             self.q.clear()
             self.send(build('QUIT', reason), urgent=True)
+            try:
+                asyncio.get_event_loop().call_later(wait, self._close_now, self._writer)
+            except RuntimeError:
+                self._close_now(self._writer)            # no running loop: close now
+
+    def _close_now(self, writer):
+        """The server did not close the connection after our QUIT: close it from our side."""
+        if writer is self._writer and writer is not None:
+            log.info('closing the connection (no answer to QUIT)')
+            try:
+                writer.transport.abort()
+            except Exception:
+                pass
+
+    async def shutdown(self, reason='Bye', timeout=10):
+        """stop(), then wait until run_forever() has ended (at most timeout seconds)."""
+        self.stop(reason, wait=max(0.5, min(5, timeout / 2)))   # close ourselves well before giving up
+        if self._done is not None:
+            try:
+                await asyncio.wait_for(self._done.wait(), timeout)
+            except asyncio.TimeoutError:
+                log.warning('the bot did not stop within %s s', timeout)
 
     async def run_forever(self):
-        delay = 5
+        delay = self.reconnect_delay
+        self._wake, self._done = asyncio.Event(), asyncio.Event()
+        if not self.running:
+            self._wake.set()
         writer = asyncio.ensure_future(self._status_loop()) if self._status else None
         try:
             await self._run_forever(delay)
@@ -223,6 +270,7 @@ class Bot:
             if writer:
                 writer.cancel()
                 self.write_status()                     # the last word: not connected
+            self._done.set()
 
     async def _run_forever(self, delay):
         while self.running:
@@ -238,11 +286,14 @@ class Bot:
             if not self.running:
                 break
             if time.time() - started > 300:
-                delay = 5                                # it was up a while: start over with short waits
+                delay = self.reconnect_delay             # it was up a while: start over with short waits
             wait = max(delay, 90) if throttled else delay
             wait *= random.uniform(0.8, 1.2)              # many bots on one host do not come back at once
             log.info('reconnecting in %.0f s', wait)
-            await asyncio.sleep(wait)
+            try:
+                await asyncio.wait_for(self._wake.wait(), wait)   # stop() ends the wait at once
+            except asyncio.TimeoutError:
+                pass
             delay = min(delay * 2, 300)
 
     async def session(self):
@@ -254,15 +305,22 @@ class Bot:
                 ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(self.host, self.port, ssl=ctx, server_hostname=self.host if ctx else None), 30)
+        if not self.running:                              # stop() came while connecting
+            writer.close()
+            return False
+        self._writer = writer
         self.q = SendQueue(writer, self.burst, self.interval, on_send=lambda l: log.debug('>> %s', l))
         sender = asyncio.ensure_future(self.q.run())
         keepalive = asyncio.ensure_future(self._keepalive(writer))
         self.nick, self.caps, self.channels = self.want_nick, set(), CaseDict(self.casemap)
         self._sasl_done = not self.sasl
+        self._sasl_started = self._cap_ended = False
+        self._offered, self._cap_requested, self._cap_pending = set(), set(), set()
         self._q_state, self._q_gen, self.account = '', getattr(self, '_q_gen', 0) + 1, ''
         self._last_rx = time.monotonic()                  # the keepalive counts from the connection's start
         throttled = False
         try:
+            asyncio.get_event_loop().call_later(30, self._cap_timeout, self._q_gen)
             self.send('CAP LS 302', urgent=True)
             if self.password:
                 self.send(build('PASS', self.password), urgent=True)
@@ -282,6 +340,7 @@ class Bot:
                     throttled = True
                 await self._handle(msg)
         finally:
+            self._writer = None
             self.q.close()
             for t in (sender, keepalive):
                 t.cancel()
@@ -313,11 +372,13 @@ class Bot:
             import base64
             token = base64.b64encode(('%s\0%s\0%s' % (self.sasl[0], self.sasl[0], self.sasl[1])).encode()).decode()
             self.send('AUTHENTICATE ' + token, urgent=True)
+        elif c == '421' and msg.arg(1).upper() == 'CAP':  # a server without CAP (ircu, QuakeNet): nothing to end
+            self._cap_ended = True
         elif c in ('903', '904', '905', '906', '907'):
             if c != '903':
                 log.warning('SASL failed (%s)', msg.text)
             self._sasl_done = True
-            self.send('CAP END', urgent=True)
+            self._cap_end()
         elif c == '001':
             self.connected = True
             self.since = time.time()
@@ -420,27 +481,63 @@ class Bot:
                 self._q_failed('Q did not answer in 30 s')
 
     async def _cap(self, msg):
+        """IRCv3 capability negotiation. Every requested capability must be answered (ACK or NAK) before SASL
+        starts or CAP END is sent, however many lines the server spreads its answers over; CAP END goes once."""
         sub = msg.arg(1).upper()
+        more = msg.arg(2) == '*'                          # "CAP nick LS * :..." - more lines follow (302)
+        words = msg.text.split()
         if sub == 'LS':
-            offered = {x.split('=', 1)[0] for x in msg.text.split()}
-            if msg.arg(2) == '*':                           # more LS lines to come
-                self._offered = getattr(self, '_offered', set()) | offered
+            self._offered |= {x.split('=', 1)[0] for x in words}
+            if more or self._cap_requested:
                 return
-            offered |= getattr(self, '_offered', set())
-            self._offered = set()
-            want = [x for x in CAPS_WANTED if x in offered] + (['sasl'] if self.sasl and 'sasl' in offered else [])
-            if want:
-                self.send(build('CAP', 'REQ', ' '.join(want)), urgent=True)
-            else:
-                self.send('CAP END', urgent=True)
+            want = [x for x in CAPS_WANTED if x in self._offered] + \
+                (['sasl'] if self.sasl and 'sasl' in self._offered else [])
+            if not want:
+                return self._cap_end()
+            self._cap_requested, self._cap_pending = set(want), set(want)
+            self.send(build('CAP', 'REQ', ' '.join(want)), urgent=True)
         elif sub == 'ACK':
-            self.caps |= set(msg.text.split())
-            if 'sasl' in self.caps and not self._sasl_done:
-                self.send('AUTHENTICATE PLAIN', urgent=True)
-            else:
-                self.send('CAP END', urgent=True)
+            for w in words:
+                name = w.lstrip('~=')                     # old modifiers some servers still send
+                if name.startswith('-'):                  # a capability turned off
+                    self.caps.discard(name[1:])
+                    self._cap_pending.discard(name[1:])
+                else:
+                    self.caps.add(name)
+                    self._cap_pending.discard(name)
+            if not more and not self._cap_pending:
+                self._cap_answered()
         elif sub == 'NAK':
+            # a REQ is all or nothing: none of the named capabilities was granted
+            log.info('the server refused the capabilities: %s', msg.text)
+            for w in words:
+                self._cap_pending.discard(w.lstrip('-~='))
+            if not more and not self._cap_pending:
+                self._cap_answered()
+        elif sub == 'DEL':                                # cap-notify: the server withdrew some
+            for w in words:
+                self.caps.discard(w)
+        # NEW (cap-notify) needs nothing: the bot keeps what it has
+
+    def _cap_answered(self):
+        """All requested capabilities answered: SASL if granted, else CAP END."""
+        if 'sasl' in self.caps and not self._sasl_done and not self._sasl_started:
+            self._sasl_started = True
+            self.send('AUTHENTICATE PLAIN', urgent=True)
+        elif not self._sasl_started or self._sasl_done:
+            self._cap_end()
+
+    def _cap_end(self):
+        if not self._cap_ended:
+            self._cap_ended = True
             self.send('CAP END', urgent=True)
+
+    def _cap_timeout(self, gen):
+        """A server that answered CAP LS but never finished: end negotiation rather than hang unregistered."""
+        if gen == self._q_gen and not self._cap_ended and not self.connected and self._offered:
+            log.warning('capability negotiation did not finish in 30 s; ending it')
+            self._sasl_done = True
+            self._cap_end()
 
     def _isupport(self, tokens):
         for t in tokens:

@@ -97,8 +97,12 @@ def check(data):
     return p
 
 
-def write_status(path, bots, title=None, now=None):
-    """Write status.json atomically (a temporary file renamed into place), readable by the web server."""
+def write_status(path, bots, title=None, now=None, mode=0o644):
+    """Write status.json atomically (a temporary file renamed into place).
+
+    mode: its permissions. 0o644 (the default) lets a web server running as another user read it, which a public
+    status page needs. If the folder is somewhere other users of the machine can look and the page is not meant
+    for them, use 0o640 with a group the web server is in, or 0o600 when it runs as your own user."""
     data = {'format': FORMAT, 'updated': int(now or time.time()), 'bots': list(bots)}
     if title:
         data['title'] = title
@@ -108,7 +112,7 @@ def write_status(path, bots, title=None, now=None):
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
-        os.chmod(tmp, 0o644)
+        os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
         try:

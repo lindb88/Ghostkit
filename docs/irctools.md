@@ -49,7 +49,9 @@ nick Q on another network.
 What `Bot` takes care of:
 
 - **Connecting**: TLS (verified; `tls_verify=False` only for a test
-  server), QuakeNet's Q login with a hidden host, IRCv3 capabilities (CAP LS 302: `sasl`, `account-tag`,
+  server), QuakeNet's Q login with a hidden host, IRCv3 capabilities
+  (every requested one answered before SASL starts or `CAP END` goes out,
+  however many lines the server uses) (CAP LS 302: `sasl`, `account-tag`,
   `extended-join`, `multi-prefix`, `away-notify`, `account-notify`,
   `server-time`, `message-tags`, whichever the server offers), SASL PLAIN,
   another nick when its nick is taken (`MyBot_`).
@@ -80,8 +82,13 @@ q_required=False)`; `bot.account` is the Q account once logged in
 - `@bot.on('PRIVMSG')`: an async function `(bot, msg)` for every such line;
   numerics too (`'001'`, `'433'`), `'*'` for every line.
 - `say(target, text)`, `notice`, `join(chan, key)`, `part`, `send(raw)`,
-  `stop(reason)`, `run()` (blocks), or `await run_forever()` inside your own
-  asyncio program.
+  `run()` (blocks), or `await run_forever()` inside your own asyncio program.
+- **Stopping:** `stop(reason)` sends QUIT and closes the connection itself
+  if the server has not within 5 seconds; a reconnect wait in progress ends
+  at once. `await bot.shutdown(reason)` does the same and waits until the bot
+  has finished. `run()` treats Ctrl-C and SIGTERM as a `stop()`, so the bot
+  says goodbye. `bot.reconnect_delay` (5) is the first wait before
+  reconnecting, doubling up to 5 minutes.
 
 - `status_file(path, every=30, title=None, hide=(), network=None,
   version=None, note=None)`: write `status.json` for webstatus's page while

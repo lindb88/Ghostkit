@@ -300,27 +300,131 @@ class TestBot(unittest.TestCase):
         # the fixed example in docs/quakenet.md, for checking an implementation in any language
         self.assertEqual(q_response('MyAccount', 'correcthorse', 'f2a4c8b0e1d3a5c7f9e2b4d6a8c0e1f3'), Q_VECTOR)
 
+    def cap_server(self, ack_lines, ls_lines=(':srv CAP * LS :sasl account-tag multi-prefix',)):
+        """A scripted server: its LS and ACK answers as given, then SASL and the welcome. Returns (server, got)."""
+        got = []
+
+        async def handle(reader, writer):
+            def send(line):
+                writer.write((line + '\r\n').encode())
+            while True:
+                raw = await reader.readline()
+                if not raw:
+                    break
+                line = raw.decode().strip()
+                got.append(line)
+                if line.startswith('CAP LS'):
+                    for l in ls_lines:
+                        send(l)
+                elif line.startswith('CAP REQ'):
+                    for l in ack_lines:
+                        send(l)
+                elif line == 'AUTHENTICATE PLAIN':
+                    send('AUTHENTICATE +')
+                elif line.startswith('AUTHENTICATE '):
+                    send(':srv 900 TestBot TestBot!t@h acct :You are now logged in as acct')
+                    send(':srv 903 TestBot :SASL authentication successful')
+                elif line == 'CAP END':
+                    send(':srv 001 TestBot :Welcome')
+                    send(':srv 376 TestBot :End of MOTD')
+                await writer.drain()
+        return handle, got
+
+    def run_cap(self, ack_lines, **kw):
+        async def go():
+            handle, got = self.cap_server(ack_lines, **kw)
+            srv = await asyncio.start_server(handle, '127.0.0.1', 0)
+            bot = make_bot(srv.sockets[0].getsockname()[1], sasl=('acct', 'pw'))
+            task = asyncio.ensure_future(bot.run_forever())
+            try:
+                await until(lambda: bot.connected, 5)
+                await asyncio.sleep(0.2)
+                return got, set(bot.caps)
+            finally:
+                await bot.shutdown(timeout=2)
+                task.cancel()
+                srv.close()
+        return self.run_async(go())
+
+    def assert_cap_order(self, got):
+        """One CAP END, after SASL finished; AUTHENTICATE only after every ACK."""
+        self.assertEqual(got.count('CAP END'), 1, got)
+        auth = got.index('AUTHENTICATE PLAIN')
+        self.assertLess(auth, got.index('CAP END'), got)
+        self.assertTrue(any(l.startswith('AUTHENTICATE ') and l != 'AUTHENTICATE PLAIN' for l in got[auth:]), got)
+
+    def test_cap_ack_split_with_continuation(self):
+        got, caps = self.run_cap([':srv CAP TestBot ACK * :account-tag multi-prefix', ':srv CAP TestBot ACK :sasl'])
+        self.assert_cap_order(got)
+        self.assertTrue({'sasl', 'account-tag', 'multi-prefix'} <= caps)
+
+    def test_cap_ack_in_separate_answers(self):
+        got, caps = self.run_cap([':srv CAP TestBot ACK :account-tag', ':srv CAP TestBot ACK :multi-prefix',
+                                  ':srv CAP TestBot ACK :sasl'])
+        self.assert_cap_order(got)
+        self.assertTrue({'sasl', 'account-tag', 'multi-prefix'} <= caps)
+
+    def test_cap_ls_over_several_lines_and_nak(self):
+        got, caps = self.run_cap([':srv CAP TestBot NAK :account-tag multi-prefix sasl'],
+                                 ls_lines=(':srv CAP * LS * :account-tag multi-prefix', ':srv CAP * LS :sasl'))
+        self.assertEqual(got.count('CAP END'), 1, got)
+        self.assertEqual([l for l in got if l.startswith('CAP REQ')], ['CAP REQ :account-tag multi-prefix sasl'])
+        self.assertNotIn('AUTHENTICATE PLAIN', got)               # refused: no SASL, registration goes on
+        self.assertFalse(caps & {'sasl', 'account-tag'})
+
     def test_reconnects_and_rejoins(self):
         async def go():
             s = await IRCServer('plain').start()
             bot = make_bot(s.port)
-            import irctools.client as C
+            bot.reconnect_delay = 0.2
             task = asyncio.ensure_future(bot.run_forever())
-            orig = asyncio.sleep
-
-            async def quick(t, *a):                                    # the reconnect wait, shortened
-                await orig(min(t, 0.2), *a)
-            C.asyncio.sleep = quick
             try:
                 await until(lambda: s.chan('#test') and 'testbot' in s.chan('#test').members, 10)
+                first = s.client('TestBot')
                 s.kill('TestBot', 'test')
-                await until(lambda: not bot.connected, 5)
-                await until(lambda: s.chan('#test') and 'testbot' in s.chan('#test').members, 10)
+                # a new connection (the bot may be back before a check could see it gone), in the channel again
+                await until(lambda: s.client('TestBot') not in (None, first) and s.chan('#test') and
+                            'testbot' in s.chan('#test').members, 10)
             finally:
-                C.asyncio.sleep = orig
                 bot.stop()
                 task.cancel()
                 await s.stop()
+        self.run_async(go())
+
+    def test_stop_closes_even_when_the_server_ignores_quit(self):
+        async def go():
+            got = []
+
+            async def deaf(reader, writer):                   # reads everything, answers nothing, never closes
+                while True:
+                    line = await reader.readline()
+                    if not line:
+                        break
+                    got.append(line.decode().strip())
+            srv = await asyncio.start_server(deaf, '127.0.0.1', 0)
+            bot = make_bot(srv.sockets[0].getsockname()[1])
+            task = asyncio.ensure_future(bot.run_forever())
+            await until(lambda: any(l.startswith('USER') for l in got), 5)
+            t0 = time.monotonic()
+            await bot.shutdown('Goodbye', timeout=3)
+            self.assertTrue(task.done(), 'run_forever is still running')
+            self.assertLess(time.monotonic() - t0, 4)
+            self.assertIn('QUIT Goodbye', got)
+            srv.close()
+        self.run_async(go())
+
+    def test_stop_during_the_reconnect_wait(self):
+        async def go():
+            srv = await asyncio.start_server(lambda r, w: w.close(), '127.0.0.1', 0)   # hangs up at once
+            bot = make_bot(srv.sockets[0].getsockname()[1])
+            bot.reconnect_delay = 60
+            task = asyncio.ensure_future(bot.run_forever())
+            await asyncio.sleep(0.5)                           # now in the 60 s wait
+            t0 = time.monotonic()
+            await bot.shutdown()
+            self.assertTrue(task.done())
+            self.assertLess(time.monotonic() - t0, 1)
+            srv.close()
         self.run_async(go())
 
 

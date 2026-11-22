@@ -18,7 +18,8 @@
 # The old file is kept as <file>.previous, the new one is written next to it and renamed into place (a crash
 # halfway never leaves half a script), and the bot rehashes.
 #
-# Fetching: curl when installed (any https), else Tcl's http package (https needs the tls package). Fetches run in
+# Fetching: https only (plain http:// only with -allowhttp 1); curl when installed, else Tcl's http package (which
+# needs the tls package for https). Redirects may not leave https. Fetches run in
 # the background; the bot never freezes waiting for a slow server.
 # Part of ghostkit (MIT license).
 
@@ -29,16 +30,23 @@ namespace eval ::eggkit::update {
   array set scripts {}
   array set busy {}
 
-  # a script to keep up to date. Options: -daily 0|1, -maxsize <bytes>, -log <proc for messages>
+  # a script to keep up to date. Options: -daily 0|1, -maxsize <bytes>, -allowhttp 0|1
+  # The address must be https:// (or file:// for a local folder). Plain http:// needs -allowhttp 1: the signature
+  # still stops a changed file, but anyone on the way sees what the bot fetches and can hold back new releases.
   proc register {name file url pubhex args} {
     variable scripts
     if {![regexp {^[0-9a-fA-F]{64}$} $pubhex]} { error "eggkit::update: $name: the key must be 64 hex characters" }
-    if {![regexp {^https?://} $url] && ![string match file://* $url]} {
-      error "eggkit::update: $name: the address must start with https:// (or http://)"
+    set o [dict merge {-daily 0 -maxsize 2000000 -allowhttp 0} $args]
+    set http [string is true -strict [dict get $o -allowhttp]]
+    if {[string match -nocase http://* $url] && !$http} {
+      error "eggkit::update: $name: the address is plain http://; use https://, or add -allowhttp 1 if you must"
     }
-    set o [dict merge {-daily 0 -maxsize 2000000} $args]
+    if {![regexp -nocase {^https://} $url] && ![string match -nocase http://* $url] && \
+        ![string match file://* $url]} {
+      error "eggkit::update: $name: the address must start with https://"
+    }
     set scripts($name) [dict create file $file url $url key [string tolower $pubhex] \
-                          daily [dict get $o -daily] maxsize [dict get $o -maxsize]]
+                          daily [dict get $o -daily] maxsize [dict get $o -maxsize] http $http]
     return $name
   }
 
@@ -71,14 +79,15 @@ namespace eval ::eggkit::update {
     if {[info exists busy($name)]} { return }
     set busy($name) 1
     set url [dict get $scripts($name) url]
-    fetch $url [dict get $scripts($name) maxsize] [list [namespace current]::got_file $name $done]
+    fetch $url [dict get $scripts($name) maxsize] [list [namespace current]::got_file $name $done] \
+      [dict get $scripts($name) http]
   }
 
   proc got_file {name done ok data} {
     variable scripts
     if {!$ok} { return [finish $name $done failed "could not fetch it: $data"] }
     set url [dict get $scripts($name) url]
-    fetch $url.sig 1000 [list [namespace current]::got_sig $name $done $data]
+    fetch $url.sig 1000 [list [namespace current]::got_sig $name $done $data] [dict get $scripts($name) http]
   }
 
   proc got_sig {name done data ok sig} {
@@ -141,12 +150,17 @@ namespace eval ::eggkit::update {
     return "updated $old -> $new (signature checked by $via); rehashing"
   }
 
-  # fetch url in the background; then cmd is called with: ok data-or-error
-  proc fetch {url maxsize cmd} {
+  # fetch url in the background; then cmd is called with: ok data-or-error. http: plain http allowed
+  proc fetch {url maxsize cmd {http 0}} {
     set curl [auto_execok curl]
     if {$curl ne ""} {
-      # the address is one argument; curl's --proto keeps it to the web and local files
-      if {[catch {open |[list {*}$curl -fsSL --proto =https,http,file --max-time 60 \
+      # the address is one argument; --proto keeps curl to https (http only when allowed, file only for a
+      # file:// address), and --proto-redir keeps a redirect from going anywhere else, such as https to http
+      set protos https
+      if {$http} { append protos ,http }
+      set first $protos
+      if {[string match file://* $url]} { append first ,file }
+      if {[catch {open |[list {*}$curl -fsSL --proto =$first --proto-redir =$protos --max-time 60 \
                                        --max-filesize $maxsize -- $url 2>@1] rb} ch]} {
         return [after 0 [list {*}$cmd 0 $ch]]
       }
@@ -157,6 +171,9 @@ namespace eval ::eggkit::update {
       return
     }
     if {[catch {package require http}]} { return [after 0 [list {*}$cmd 0 "neither curl nor Tcl's http package"]] }
+    if {![string match -nocase https://* $url] && !($http && [string match -nocase http://* $url])} {
+      return [after 0 [list {*}$cmd 0 "Tcl's http package fetches only https:// (or http:// with -allowhttp 1)"]]
+    }
     if {[string match https://* $url]} {
       if {[catch {package require tls}]} { return [after 0 [list {*}$cmd 0 "https needs curl or the tls package"]] }
       ::http::register https 443 [list ::tls::socket -autoservername 1]

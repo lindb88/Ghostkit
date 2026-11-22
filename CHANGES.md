@@ -24,6 +24,20 @@
   Both have fixed examples to check an implementation against.
 - examples/botnet/teambot.py: the simplest botnet, two bots where one
   answers and the other takes over when it goes, tested with irclab.
+- irctools: `stop()` closes the connection itself when the server does not
+  answer QUIT within 5 seconds, ends a reconnect wait at once, and
+  `await bot.shutdown()` waits until the bot has finished; `run()` turns
+  Ctrl-C and SIGTERM into a goodbye. `bot.reconnect_delay` sets the first
+  wait.
+- irctools: CAP negotiation waits for every requested capability to be
+  answered, however many ACK lines the server uses, before SASL or `CAP
+  END` (before, split ACKs could end negotiation before the SASL login);
+  `CAP END` goes once; CAP DEL handled; a stalled negotiation ends after 30
+  seconds.
+- eggkit-update.tcl: https only by default; plain `http://` needs
+  `-allowhttp 1`, and redirects may not leave https.
+- webstatus: the status file's permissions can be set (`mode=`, default
+  0644 so a web server can read it), with advice for shared folders.
 - **webstatus**: a status page for a bot in any language. The bot writes
   `status.json`; one self-contained HTML file shows its bots, connection
   times, channels and user counts, warns when the file is old, and refreshes

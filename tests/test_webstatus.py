@@ -66,6 +66,21 @@ class TestFormat(unittest.TestCase):
             self.assertEqual(os.stat(fn).st_mode & 0o777, 0o644)
             self.assertEqual(os.listdir(os.path.dirname(fn)), ['status.json'])   # no temporary file left
 
+    def test_tighter_permissions(self):
+        with tempfile.TemporaryDirectory() as d:
+            fn = os.path.join(d, 'status.json')
+            webstatus.write_status(fn, good()['bots'], mode=0o640)
+            self.assertEqual(os.stat(fn).st_mode & 0o777, 0o640)
+            from irctools import Bot
+            bot = Bot('B', '127.0.0.1')
+            bot.status_file(os.path.join(d, 'bot.json'), mode=0o600, network='Test')
+            bot.write_status()
+            self.assertEqual(os.stat(os.path.join(d, 'bot.json')).st_mode & 0o777, 0o600)
+            with open(os.path.join(d, 'bot.json')) as f:
+                data = json.load(f)
+            self.assertEqual(webstatus.check(data), [])
+            self.assertNotIn('_mode', data['bots'][0])
+
     def test_check_command(self):
         with tempfile.TemporaryDirectory() as d:
             fn = os.path.join(d, 's.json')

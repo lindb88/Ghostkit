@@ -209,6 +209,48 @@ class TestUpdater(unittest.TestCase):
             self.assertIn('puts old', now)
             self.assertEqual(sorted(os.listdir(os.path.dirname(self.installed))), ['myscript.tcl'])
 
+    def test_plain_http_needs_opting_in(self):
+        out = tcl('puts [catch {::eggkit::update::register a f http://example.org/a.tcl %s} e]\nputs $e\n'
+                  'puts [catch {::eggkit::update::register b f ftp://example.org/b.tcl %s} e]\n'
+                  'puts [catch {::eggkit::update::register c f http://example.org/c.tcl %s -allowhttp 1} e]\n'
+                  'puts [catch {::eggkit::update::register d f HTTPS://example.org/d.tcl %s} e]\n'
+                  % ((self.pub,) * 4))
+        lines = out.splitlines()
+        self.assertEqual(lines[0], '1')
+        self.assertIn('-allowhttp 1', lines[1])
+        self.assertEqual(lines[2:], ['1', '0', '0'])
+
+    def test_http_when_allowed(self):
+        import http.server
+        import threading
+        new = '# eggkit-name: myscript\n# eggkit-version: 2.0\nputs new\n'
+        self.publish(new)
+        handler = lambda *a, **kw: http.server.SimpleHTTPRequestHandler(*a, directory=self.pubdir, **kw)  # noqa
+        http.server.SimpleHTTPRequestHandler.log_message = lambda *a: None
+        srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            url = 'http://127.0.0.1:%d/myscript.tcl' % srv.server_address[1]
+            out = tcl('::eggkit::update::register myscript {%s} {%s} %s -allowhttp 1\n'
+                      'proc done {n r m} { puts "$r|$m"; set ::fin 1 }\n'
+                      '::eggkit::update::check myscript done\nvwait ::fin\n' % (self.installed, url, self.pub))
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        self.assertTrue(out.splitlines()[-1].startswith('updated|updated 1.9 -> 2.0'), out)
+        # without the opt-in, curl itself refuses plain http (the same switch stops a redirect from https to http)
+        srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            out = tcl('proc got {ok data} { puts "$ok|$data"; set ::fin 1 }\n'
+                      '::eggkit::update::fetch http://127.0.0.1:%d/myscript.tcl 100000 got 0\nvwait ::fin\n'
+                      % srv.server_address[1])
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        self.assertTrue(out.startswith('0|'), out)
+        self.assertNotIn('puts new', out)
+
     def test_missing_file(self):
         result, rehashed, now = self.check()                          # nothing published
         self.assertTrue(result.startswith('failed|could not fetch it'), result)

@@ -79,6 +79,13 @@ python3 -m webstatus demo            # see it with made-up bots: http://127.0.0.
 - **Leave out secret channels.** Everything in the file is public once it is
   on a web server. With irctools: `bot.status_file('www/status.json',
   hide=['#secret'])`.
+- **Mind who can read the file.** It is written readable by everyone on the
+  machine (`0644`), because the web server usually runs as another user and
+  the page is meant to be public. If it sits in a shared folder and holds
+  things not everyone on the machine should see (server names, channel
+  names), give it tighter permissions: `mode=0o640` with a group the web
+  server is in, or `0o600` when the web server runs as your own user
+  (`write_status(..., mode=...)`, `bot.status_file(..., mode=...)`).
 - **Counts, not names.** The format holds how many people are in a channel,
   never who. Keep it that way: a list of nicks on a public page is personal
   data.

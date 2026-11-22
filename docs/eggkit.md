@@ -126,11 +126,14 @@ eggupdate: greeter: updated 1.0 -> 1.1 (signature checked by openssl); rehashing
 eggupdate: greeter: refused: the signature does not match your key
 ```
 
-Downloads use curl when it is installed, else Tcl's `http` package (which
-needs the `tls` package for https). They run in the background, so a slow
-server never freezes the bot.
+The address must be **https://**. Plain `http://` is refused unless you add
+`-allowhttp 1`: the signature would still stop a changed file, but anyone
+on the way could see what the bot fetches and hold back new releases.
+Redirects may not leave https either. Downloads use curl when it is
+installed, else Tcl's `http` package (which needs the `tls` package for
+https). They run in the background, so a slow server never freezes the bot.
 
-`register` options: `-daily 0|1`, `-maxsize <bytes>`. From your own code:
+`register` options: `-daily 0|1`, `-maxsize <bytes>`, `-allowhttp 0|1`. From your own code:
 `::eggkit::update::check greeter ?callback?`, where the callback gets the
 name, `updated`, `current` or `failed`, and the message.
 
