@@ -19,12 +19,15 @@ ap.add_argument('--tls', action='store_true')
 ap.add_argument('--nick', default='EchoBot')
 ap.add_argument('--channel', action='append', default=[])
 ap.add_argument('--fast', action='store_true', help='no flood pacing (only for a local test server)')
+ap.add_argument('--status', help='write status.json for webstatus here (e.g. www/status.json)')
 ap.add_argument('-v', '--verbose', action='store_true')
 a = ap.parse_args()
 logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format='%(asctime)s %(message)s')
 
 bot = Bot(a.nick, a.server, a.port, tls=a.tls, channels=a.channel or ['#test'],
           interval=0.05 if a.fast else 1.5, burst=20 if a.fast else 4)
+if a.status:
+    bot.status_file(a.status, every=5 if a.fast else 30, version='1.0')
 
 
 @bot.command('!echo')

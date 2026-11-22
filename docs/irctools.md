@@ -64,6 +64,11 @@ tls_verify=True, burst=4, interval=1.5)`
   `stop(reason)`, `run()` (blocks), or `await run_forever()` inside your own
   asyncio program.
 
+- `status_file(path, every=30, title=None, hide=(), network=None,
+  version=None, note=None)`: write `status.json` for webstatus's page while
+  running; `status()` gives the same as a dict. See
+  [webstatus.md](webstatus.md).
+
 ## The pieces
 
 ```python

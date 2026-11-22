@@ -6,6 +6,13 @@
   Go bot (`examples/node`, `examples/go`), and a README section on testing a
   bot in any language. Their tests run where node and go are installed.
 
+- **webstatus**: a status page for a bot in any language. The bot writes
+  `status.json`; one self-contained HTML file shows its bots, connection
+  times, channels and user counts, warns when the file is old, and refreshes
+  every 30 seconds. Read-only and safe to put online. `python3 -m webstatus
+  serve | check | install | demo`. irctools' `Bot.status_file()` writes it;
+  the Python, Node.js and Go examples have `--status`.
+
 ### 0.1.0 (2026-11-22)
 
 The first release.

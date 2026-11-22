@@ -1,0 +1,183 @@
+<!doctype html>
+<!-- webstatus: a status page for IRC bots, in any language. Part of ghostkit (MIT license).
+     Put this file next to the status.json your bot writes and open it through a web server
+     (python3 -m webstatus serve, or any static server). ?src=other.json reads another file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Bot status</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #16191d; --muted: #5d6670; --line: #e3e6ea;
+    --ok: #1f8a4c; --ok-bg: #e5f5ec; --bad: #b42318; --bad-bg: #fdecea; --warn: #9a6700; --warn-bg: #fff4d6;
+    --accent: #2f6fde;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --card: #171b21; --text: #e7eaee; --muted: #9aa4af; --line: #262c34;
+      --ok: #4ccb7f; --ok-bg: #12301f; --bad: #ff7b72; --bad-bg: #3a1714; --warn: #e3b341; --warn-bg: #362a0d;
+      --accent: #6ea8ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 48px; }
+  header h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .summary { color: var(--muted); margin: 0 0 24px; }
+  .summary b { color: var(--text); font-weight: 600; }
+  .notice { border-radius: 10px; padding: 10px 14px; margin: 0 0 20px; }
+  .notice.warn { background: var(--warn-bg); color: var(--warn); }
+  .notice.bad { background: var(--bad-bg); color: var(--bad); }
+  .bot { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+         margin: 0 0 14px; }
+  .top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+  .name { font-size: 18px; font-weight: 650; overflow-wrap: anywhere; }
+  .pill { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 99px; white-space: nowrap; }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.bad { background: var(--bad-bg); color: var(--bad); }
+  .meta { color: var(--muted); font-size: 14px; margin: 4px 0 0; overflow-wrap: anywhere; }
+  .note { margin: 8px 0 0; overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 0; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 0; border-bottom: 1px solid var(--line); }
+  td { padding: 6px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; width: 6em; }
+  .op { color: var(--accent); font-weight: 600; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 28px; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="title">Bot status</h1>
+    <p class="summary" id="summary">Loading…</p>
+  </header>
+  <div id="notice"></div>
+  <section id="bots" aria-live="polite"></section>
+  <footer><span id="updated"></span> · <a href="https://github.com/lindb88/Ghostkit">webstatus</a></footer>
+</main>
+<script>
+'use strict';
+// Every value from status.json goes into the page as text (textContent), never as HTML, so a channel or
+// bot name with <script> in it shows as those characters and does nothing.
+const REFRESH = 30;                                          // seconds
+const params = new URLSearchParams(location.search);
+const src = /^[\w.\-\/]+\.json$/.test(params.get('src') || '') ? params.get('src') : 'status.json';
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined && text !== null) e.textContent = String(text);
+  return e;
+}
+
+function ago(seconds) {
+  seconds = Math.max(0, Math.round(seconds));
+  const units = [['day', 86400], ['hour', 3600], ['minute', 60]];
+  const out = [];
+  for (const [name, n] of units) {
+    const v = Math.floor(seconds / n);
+    if (v) { out.push(v + ' ' + name + (v === 1 ? '' : 's')); seconds -= v * n; }
+    if (out.length === 2) break;
+  }
+  return out.length ? out.join(' ') : 'under a minute';
+}
+
+function num(v) { return Number.isFinite(v) ? v : null; }
+
+function render(data) {
+  const now = Date.now() / 1000;
+  const bots = Array.isArray(data.bots) ? data.bots.filter(b => b && typeof b === 'object') : [];
+  const title = typeof data.title === 'string' && data.title.trim() ? data.title.trim().slice(0, 80) : 'Bot status';
+  document.title = title;
+  document.getElementById('title').textContent = title;
+
+  const up = bots.filter(b => b.connected === true).length;
+  let chans = 0, users = 0;
+  for (const b of bots) for (const c of (Array.isArray(b.channels) ? b.channels : [])) {
+    chans++; users += num(c.users) || 0;
+  }
+  const s = document.getElementById('summary');
+  s.textContent = '';
+  const part = (n, one, many) => { s.append(el('b', '', n)); s.append(' ' + (n === 1 ? one : many)); };
+  part(bots.length, 'bot', 'bots'); s.append(bots.length ? ' (' + up + ' connected), ' : ', ');
+  part(chans, 'channel', 'channels'); s.append(', '); part(users, 'person', 'people'); s.append('.');
+
+  const notice = document.getElementById('notice');
+  notice.textContent = '';
+  const updated = num(data.updated);
+  if (updated && now - updated > 300) {
+    notice.append(el('p', 'notice warn', 'This status is ' + ago(now - updated) +
+      ' old: the bot may have stopped writing it.'));
+  }
+
+  const list = document.getElementById('bots');
+  list.textContent = '';
+  if (!bots.length) list.append(el('p', 'meta', 'No bots in the status file.'));
+  for (const b of bots) {
+    const card = el('article', 'bot');
+    const top = el('div', 'top');
+    top.append(el('span', 'name', b.name || '(no name)'));
+    top.append(el('span', 'pill ' + (b.connected ? 'ok' : 'bad'), b.connected ? 'connected' : 'not connected'));
+    card.append(top);
+    const meta = [];
+    if (b.network) meta.push(String(b.network) + (b.server ? ' (' + b.server + ')' : ''));
+    if (b.connected && num(b.since)) meta.push('connected for ' + ago(now - b.since));
+    else if (num(b.started)) meta.push('running for ' + ago(now - b.started));
+    if (b.version) meta.push('version ' + b.version);
+    if (meta.length) card.append(el('p', 'meta', meta.join(' · ')));
+    if (b.note) card.append(el('p', 'note', String(b.note).slice(0, 300)));
+    const cs = Array.isArray(b.channels) ? b.channels.filter(c => c && c.name) : [];
+    if (cs.length) {
+      const t = el('table');
+      const head = el('tr');
+      head.append(el('th', '', 'Channel')); head.append(el('th', 'num', 'People'));
+      t.append(head);
+      for (const c of cs.slice(0, 200)) {
+        const tr = el('tr');
+        const name = el('td', '', c.name);
+        if (c.op) { name.append(' '); name.append(el('span', 'op', '@')); name.title = 'the bot has ops here'; }
+        tr.append(name);
+        tr.append(el('td', 'num', num(c.users) === null ? '–' : c.users));
+        t.append(tr);
+      }
+      card.append(t);
+    }
+    list.append(card);
+  }
+  document.getElementById('updated').textContent =
+    updated ? 'Updated ' + new Date(updated * 1000).toLocaleString() : '';
+}
+
+function fail(why) {
+  const notice = document.getElementById('notice');
+  notice.textContent = '';
+  notice.append(el('p', 'notice bad', why));
+  if (document.getElementById('summary').textContent === 'Loading…')
+    document.getElementById('summary').textContent = '';
+}
+
+async function load() {
+  try {
+    const r = await fetch(src + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return fail('Could not read ' + src + ' (HTTP ' + r.status + ').');
+    const data = await r.json();
+    if (!data || typeof data !== 'object' || !Array.isArray(data.bots))
+      return fail(src + ' is not in the webstatus format (it needs a "bots" list).');
+    render(data);
+  } catch (e) {
+    fail(location.protocol === 'file:'
+      ? 'Open this page through a web server (python3 -m webstatus serve), not as a file.'
+      : 'Could not read ' + src + ': ' + e.message);
+  }
+}
+load();
+setInterval(load, REFRESH * 1000);
+</script>
+</body>
+</html>

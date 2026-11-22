@@ -24,7 +24,9 @@ never contains a line break, so users cannot make the bot send IRC lines of thei
 """
 
 import asyncio
+import json
 import logging
+import os
 import random
 import ssl
 import time
@@ -82,6 +84,8 @@ class Bot:
         self.caps = set()
         self.connected = False
         self.running = True
+        self.started, self.since = time.time(), None   # the program's start; connected since (None: not now)
+        self._status = None                             # (path, every, options) from status_file()
         self.q = None
         self._last_rx = 0.0
 
@@ -129,6 +133,49 @@ class Bot:
         c = self.channels.get(chan)
         return bool(c) and '@' in c.users.get(self.lower(nick or self.nick), '')
 
+    # ---- a status page (webstatus) ----
+    def status(self, hide=(), network=None, version=None, note=None):
+        """This bot in webstatus's format: name, connected, channels with their user counts and whether it has ops.
+        Channels in hide are left out (secret ones)."""
+        hidden = {self.lower(h) for h in hide}
+        b = {'name': self.nick, 'connected': self.connected, 'server': self.host, 'started': int(self.started),
+             'channels': [{'name': c.name, 'users': len(c.users), 'op': self.is_op(c.name)}
+                          for k, c in sorted(self.channels.items()) if k not in hidden]}
+        if self.connected and self.since:
+            b['since'] = int(self.since)
+        for k, v in (('network', network), ('version', version), ('note', note)):
+            if v:
+                b[k] = v
+        return b
+
+    def status_file(self, path, every=30, title=None, **options):
+        """Write status.json for webstatus's page every so many seconds while running (and when stopping).
+        options: hide=[...], network=..., version=..., note=... (as status())."""
+        self._status = (path, every, title, options)
+
+    def write_status(self):
+        if not self._status:
+            return
+        path, _, title, options = self._status
+        data = {'format': 1, 'updated': int(time.time()), 'bots': [self.status(**options)]}
+        if title:
+            data['title'] = title
+        folder = os.path.dirname(os.path.abspath(path))
+        tmp = os.path.join(folder, '.%s.%d.tmp' % (os.path.basename(path), os.getpid()))
+        try:
+            os.makedirs(folder, exist_ok=True)
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, path)                       # the page never reads half a file
+        except OSError as e:
+            log.warning('could not write %s: %s', path, e)
+
+    async def _status_loop(self):
+        while self.running:
+            self.write_status()
+            await asyncio.sleep(self._status[1])
+
     # ---- running ----
     def run(self):
         """Connect, and stay connected until stop() (or Ctrl-C)."""
@@ -145,6 +192,15 @@ class Bot:
 
     async def run_forever(self):
         delay = 5
+        writer = asyncio.ensure_future(self._status_loop()) if self._status else None
+        try:
+            await self._run_forever(delay)
+        finally:
+            if writer:
+                writer.cancel()
+                self.write_status()                     # the last word: not connected
+
+    async def _run_forever(self, delay):
         while self.running:
             started = time.time()
             throttled = False
@@ -152,7 +208,9 @@ class Bot:
                 throttled = await self.session()
             except (OSError, asyncio.TimeoutError, ConnectionError, ssl.SSLError) as e:
                 log.warning('connection: %s', e)
-            self.connected = False
+            self.connected, self.since = False, None
+            if self._status:
+                self.write_status()
             if not self.running:
                 break
             if time.time() - started > 300:
@@ -237,6 +295,7 @@ class Bot:
             self.send('CAP END', urgent=True)
         elif c == '001':
             self.connected = True
+            self.since = time.time()
             self.nick = msg.arg(0, self.nick)
         elif c == '005':
             self._isupport(p[1:-1])

@@ -12,6 +12,7 @@ Python 3.8+ and Tcl 8.6/9, with nothing to install. MIT license.
 | **irclab** | a test IRC server and scripted users; test a bot in any language with a plain text scenario | [docs/irclab.md](docs/irclab.md) |
 | **irctools** | the pieces of a Python IRC bot: parsing, case rules, masks, flood-safe sending, and a `Bot` that does the housekeeping | [docs/irctools.md](docs/irctools.md) |
 | **eggkit** | for eggdrop scripts: safe helpers, Ed25519 signature checks in plain Tcl, and signed self-updates | [docs/eggkit.md](docs/eggkit.md) |
+| **webstatus** | a status page for any bot: the bot writes a small `status.json`, one HTML file shows it | [docs/webstatus.md](docs/webstatus.md) |
 | **ghostbot plugins** | writing plugins for ghostbot, with an example | [docs/ghostbot-plugins.md](docs/ghostbot-plugins.md) |
 
 ## Five minutes
@@ -92,12 +93,16 @@ python3 eggkit/sign.py keygen release.key        # once; prints your public key
 python3 eggkit/sign.py sign release.key myscript.tcl
 ```
 
+Or give it a status page: `python3 -m webstatus demo` shows what it looks
+like; your bot writes `status.json` and `python3 -m webstatus serve` shows it.
+
 ## What is here
 
 ```
 irclab/        the test server, users and scenario runner   (python3 -m irclab run|serve)
 irctools/      the bot pieces and Bot
 eggkit/        eggkit-util.tcl, eggkit-ed25519.tcl, eggkit-update.tcl, sign.py
+webstatus/     the status page (index.html), its format check, a small server   (python3 -m webstatus)
 examples/      echobot.py + echobot.scenario (Python), node/ and go/ bots with their scenarios,
                eggdrop/greeter.tcl, ghostbot/quotes.py + its test
 tests/         python3 tests/run.py
