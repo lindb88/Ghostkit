@@ -1,0 +1,36 @@
+# Test for quotes.py: copy to plugins/tests/ and run ./ghostbot.sh test quotes
+# When this starts, TestBot is opped in #test and Owner (logged in as the botnet owner) is in #test.
+
+user Alice
+Alice join #test
+Alice say #test !quote
+expect Alice from TestBot in #test "No quotes yet"
+
+# Alice has no access: she cannot add
+Alice say #test "!quote add the cake is a lie"
+expect Alice from TestBot notice "needs voice or higher"
+
+# voice access by her host (this network has no accounts)
+Owner say TestBot "adduser #test voice *!*alice@alice.host"
+expect Owner from TestBot private "alice"
+Alice say #test "!quote add the cake is a lie"
+expect Alice from TestBot in #test "Added as #1."
+Alice say #test "!quote add all your base"
+expect Alice from TestBot in #test "Added as #2."
+
+Alice say #test "!quote 1"
+expect Alice from TestBot in #test "#1: the cake is a lie (added by Alice)"
+Alice say #test "!quote base"
+expect Alice from TestBot in #test "#2: all your base"
+Alice say #test "!quote count"
+expect Alice from TestBot in #test "#test has 2 quotes."
+
+# only ops remove
+Alice say #test "!quote del 1"
+expect Alice from TestBot notice "needs op or higher"
+Owner say #test "!quote del 1"
+expect Owner from TestBot in #test "Removed #1."
+Alice say #test "!quote 1"
+expect Alice from TestBot in #test "There is no quote #1."
+Alice say #test "!quote 2"
+expect Alice from TestBot in #test "#2: all your base"

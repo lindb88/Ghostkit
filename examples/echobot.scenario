@@ -1,0 +1,24 @@
+# Tests examples/echobot.py:  python3 -m irclab run examples/echobot.scenario
+bot python3 echobot.py --port {port} --fast --channel #test
+wait EchoBot in #test
+
+user Alice
+Alice join #test
+expect Alice from EchoBot notice "Welcome to #test, Alice."
+
+Alice say #test !hello
+expect Alice from EchoBot in #test "Hello, Alice!"
+
+Alice say #test "!echo some words"
+expect Alice from EchoBot in #test "some words"
+
+# Private: the ! may be left out
+Alice say EchoBot hello
+expect Alice from EchoBot private "Hello, Alice!"
+
+# Not a command: no answer
+Alice say #test "just talking"
+refute Alice from EchoBot in #test for 1
+
+Alice say #test !ops
+expect Alice from EchoBot notice "Ops in #test"
