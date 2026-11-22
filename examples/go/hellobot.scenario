@@ -1,0 +1,19 @@
+# Tests go/hellobot.go:  python3 -m irclab run examples/go/hellobot.scenario
+bot go run hellobot.go -port {port}
+wait HelloBot in #test within 90
+
+user Alice
+Alice join #test
+Alice say #test !hello
+expect Alice from HelloBot in #test "Hello, Alice!"
+
+Alice say #test "!echo some words"
+expect Alice from HelloBot in #test "some words"
+
+# not a command: no answer
+Alice say #test "just talking"
+refute Alice from HelloBot in #test for 1
+
+# privately, the ! may be left out
+Alice say HelloBot hello
+expect Alice from HelloBot private "Hello, Alice!"

@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -153,6 +154,18 @@ class TestScenario(unittest.TestCase):
                 text = f.read()
             ok = asyncio.run(mod.Runner(text, out=lambda l: None, base=os.path.join(ROOT, 'examples')).run())
         self.assertTrue(ok)
+
+    @unittest.skipUnless(shutil.which('node'), 'no node')
+    def test_node_bot(self):
+        with open(os.path.join(ROOT, 'examples', 'node', 'hellobot.scenario')) as f:
+            ok, out = run_scenario(f.read(), os.path.join(ROOT, 'examples', 'node'))
+        self.assertTrue(ok, '\n'.join(out))
+
+    @unittest.skipUnless(shutil.which('go'), 'no go')
+    def test_go_bot(self):
+        with open(os.path.join(ROOT, 'examples', 'go', 'hellobot.scenario')) as f:
+            ok, out = run_scenario(f.read(), os.path.join(ROOT, 'examples', 'go'))
+        self.assertTrue(ok, '\n'.join(out))
 
     def test_command_line(self):
         r = subprocess.run([sys.executable, '-m', 'irclab', 'run', os.path.join('examples', 'echobot.scenario')],

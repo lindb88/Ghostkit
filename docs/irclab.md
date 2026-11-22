@@ -49,6 +49,10 @@ not ok 4 - expect Alice from MyBot in #test 'Hello, Alice' (line 7)
 #   connected; joined #test
 ```
 
+Your bot can be in any language: it only has to take the server's port from
+its command line (or a config file the `bot` line writes). `examples/node/`
+and `examples/go/` are two small bots, each with its scenario.
+
 ## The steps
 
 One step per line. A line starting with `#` is a comment; a `#` later in a

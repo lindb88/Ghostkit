@@ -45,6 +45,32 @@ and run `python3 -m irclab run mybot.scenario`. Your bot can be in any
 language; it only has to take the server and port from its command line
 (or a config file the `bot` line points at).
 
+### Any language
+
+irclab doesn't care what your bot is written in: it is a real IRC server on
+your own machine, and your bot connects to it like to any network. Only
+irclab itself needs Python (already on almost every Linux and Mac). Two small
+bots in other languages, each with its test, are in `examples/`:
+
+```
+python3 -m irclab run examples/node/hellobot.scenario     # Node.js
+python3 -m irclab run examples/go/hellobot.scenario       # Go
+```
+
+The scenario is the same text whatever the language; only the `bot` line
+changes:
+
+```
+bot node hellobot.js --port {port}
+bot go run hellobot.go -port {port}
+bot perl mybot.pl --port {port}
+bot ./target/release/mybot --port {port}
+bot java -jar mybot.jar --port {port}
+```
+
+For an eggdrop, point the `bot` line at a script that writes a config with
+`server add 127.0.0.1 {port}` and starts `./eggdrop -n -m`.
+
 Or start a Python bot on irctools:
 
 ```python
@@ -72,7 +98,8 @@ python3 eggkit/sign.py sign release.key myscript.tcl
 irclab/        the test server, users and scenario runner   (python3 -m irclab run|serve)
 irctools/      the bot pieces and Bot
 eggkit/        eggkit-util.tcl, eggkit-ed25519.tcl, eggkit-update.tcl, sign.py
-examples/      echobot.py + echobot.scenario, eggdrop/greeter.tcl, ghostbot/quotes.py + its test
+examples/      echobot.py + echobot.scenario (Python), node/ and go/ bots with their scenarios,
+               eggdrop/greeter.tcl, ghostbot/quotes.py + its test
 tests/         python3 tests/run.py
 tools/         bundle_irclab.py: irclab as one file to ship inside a project
 docs/

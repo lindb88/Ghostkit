@@ -1,5 +1,11 @@
 # ghostkit: version history
 
+### 0.1.1 (not released yet)
+
+- Examples in other languages, each tested with irclab: a Node.js bot and a
+  Go bot (`examples/node`, `examples/go`), and a README section on testing a
+  bot in any language. Their tests run where node and go are installed.
+
 ### 0.1.0 (2026-11-22)
 
 The first release.
