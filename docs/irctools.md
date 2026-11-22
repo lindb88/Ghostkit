@@ -28,10 +28,26 @@ async def welcome(bot, msg):
 bot.run()
 ```
 
+On **QuakeNet**, which has no SASL, log in to Q instead:
+
+```python
+bot = Bot('MyBot', 'irc.quakenet.org', 6667, channels=['#mytest'],
+          q_auth=('MyAccount', os.environ['Q_PASSWORD']))
+```
+
+The bot logs in with Q's CHALLENGEAUTH (HMAC-SHA-256, as QuakeNet
+documents it: the password itself is never sent), sets `+x` so its host
+becomes `MyAccount.users.quakenet.org`, and only then joins its channels,
+so its real address never shows in them. If the login fails, it joins
+anyway and logs a warning; with `q_required=True` it stays out instead.
+`hide_host=False` skips `+x`. Only notices from the real Q
+(`Q!TheQBot@CServe.quakenet.org`) count, not from someone who takes the
+nick Q on another network.
+
 What `Bot` takes care of:
 
 - **Connecting**: TLS (verified; `tls_verify=False` only for a test
-  server), IRCv3 capabilities (CAP LS 302: `sasl`, `account-tag`,
+  server), QuakeNet's Q login with a hidden host, IRCv3 capabilities (CAP LS 302: `sasl`, `account-tag`,
   `extended-join`, `multi-prefix`, `away-notify`, `account-notify`,
   `server-time`, `message-tags`, whichever the server offers), SASL PLAIN,
   another nick when its nick is taken (`MyBot_`).
@@ -51,7 +67,8 @@ What `Bot` takes care of:
 
 `Bot(nick, host, port=6667, tls=False, channels=(), sasl=None,
 realname=..., username=None, password=None, prefix_chars='!',
-tls_verify=True, burst=4, interval=1.5)`
+tls_verify=True, burst=4, interval=1.5, q_auth=None, hide_host=True,
+q_required=False)`; `bot.account` is the Q account once logged in
 
 - `@bot.command('!word')`: an async function taking a `Context`: `.nick`,
   `.account`, `.args` (the rest of the line), `.where` (the channel, or

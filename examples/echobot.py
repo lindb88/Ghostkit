@@ -1,6 +1,7 @@
 """A small bot on irctools: !echo, !hello, !ops, and a welcome on join.
 
     python3 examples/echobot.py --server irc.libera.chat --port 6697 --tls --channel '#mytest'
+    Q_PASSWORD=... python3 examples/echobot.py --server irc.quakenet.org --q-account MyAccount --channel '#mytest'
     python3 -m irclab run examples/echobot.scenario        # tests it against a local test server
 """
 
@@ -20,12 +21,18 @@ ap.add_argument('--nick', default='EchoBot')
 ap.add_argument('--channel', action='append', default=[])
 ap.add_argument('--fast', action='store_true', help='no flood pacing (only for a local test server)')
 ap.add_argument('--status', help='write status.json for webstatus here (e.g. www/status.json)')
+ap.add_argument('--q-account', help='QuakeNet: log in to Q with this account (the password in $Q_PASSWORD)')
 ap.add_argument('-v', '--verbose', action='store_true')
 a = ap.parse_args()
 logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format='%(asctime)s %(message)s')
 
+q = None
+if a.q_account:
+    if not os.environ.get('Q_PASSWORD'):
+        sys.exit('Set Q_PASSWORD to the Q password (not on the command line, where others can see it).')
+    q = (a.q_account, os.environ['Q_PASSWORD'])
 bot = Bot(a.nick, a.server, a.port, tls=a.tls, channels=a.channel or ['#test'],
-          interval=0.05 if a.fast else 1.5, burst=20 if a.fast else 4)
+          interval=0.05 if a.fast else 1.5, burst=20 if a.fast else 4, q_auth=q)
 if a.status:
     bot.status_file(a.status, every=5 if a.fast else 30, version='1.0')
 

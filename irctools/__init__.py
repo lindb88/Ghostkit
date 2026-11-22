@@ -4,7 +4,7 @@
     casemap   lower(), equal(), CaseDict: names compared the way the server does
     masks     match('*!*bob@*', mask), ban_mask()
     sendq     SendQueue: flood-safe sending
-    client    Bot: connecting, CAP, SASL, reconnects, channels, commands
+    client    Bot: connecting, CAP, SASL or QuakeNet's Q, reconnects, channels, commands, status.json
 
 Taken from ghostbot, where they run a botnet. Part of ghostkit (MIT license). See docs/irctools.md.
 """
@@ -15,6 +15,6 @@ from .masks import ban_mask, is_channel, match
 from .message import Message, build, clean, parse, split_text
 from .sendq import SendQueue
 
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 __all__ = ['Bot', 'Context', 'Message', 'parse', 'build', 'clean', 'split_text', 'lower', 'equal', 'CaseDict',
            'match', 'ban_mask', 'is_channel', 'SendQueue', '__version__']

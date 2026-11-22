@@ -1,11 +1,15 @@
 # ghostkit: version history
 
-### 0.1.1 (not released yet)
+### 0.1.1 (2026-11-22)
 
 - Examples in other languages, each tested with irclab: a Node.js bot and a
   Go bot (`examples/node`, `examples/go`), and a README section on testing a
   bot in any language. Their tests run where node and go are installed.
-
+- irctools: QuakeNet's Q login (`Bot(q_auth=(account, password))`):
+  CHALLENGEAUTH with HMAC-SHA-256, the hidden host (`+x`) before any channel
+  is joined, only the real Q believed; `q_required=True` stays out of
+  channels when the login fails. The echo bot has `--q-account` (the
+  password from `$Q_PASSWORD`).
 - **webstatus**: a status page for a bot in any language. The bot writes
   `status.json`; one self-contained HTML file shows its bots, connection
   times, channels and user counts, warns when the file is old, and refreshes

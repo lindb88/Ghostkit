@@ -24,6 +24,8 @@ never contains a line break, so users cannot make the bot send IRC lines of thei
 """
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -39,6 +41,13 @@ from .sendq import SendQueue
 log = logging.getLogger('irctools')
 CAPS_WANTED = ('account-tag', 'extended-join', 'multi-prefix', 'away-notify', 'account-notify', 'server-time',
                'message-tags')
+
+
+def q_response(account, password, challenge):
+    """QuakeNet's CHALLENGEAUTH answer with HMAC-SHA-256 (as documented by QuakeNet): the password is never sent."""
+    passhash = hashlib.sha256(password[:10].encode()).hexdigest()
+    key = hashlib.sha256((lower(account) + ':' + passhash).encode()).hexdigest()
+    return hmac.new(key.encode(), challenge.encode(), hashlib.sha256).hexdigest()
 
 
 class Context:
@@ -68,8 +77,12 @@ class Channel:
 
 class Bot:
     def __init__(self, nick, host, port=6667, tls=False, channels=(), sasl=None, realname='irctools bot',
-                 username=None, password=None, prefix_chars='!', tls_verify=True, burst=4, interval=1.5):
+                 username=None, password=None, prefix_chars='!', tls_verify=True, burst=4, interval=1.5,
+                 q_auth=None, hide_host=True, q_required=False):
         self.nick, self.want_nick = nick, nick
+        self.q_auth = q_auth                            # (account, password) for QuakeNet's Q
+        self.hide_host, self.q_required = hide_host, q_required
+        self.account = ''
         self.host, self.port, self.tls, self.tls_verify = host, port, tls, tls_verify
         self.channels_wanted = list(channels)
         self.sasl = sasl                                # (account, password) for SASL PLAIN
@@ -86,6 +99,7 @@ class Bot:
         self.running = True
         self.started, self.since = time.time(), None   # the program's start; connected since (None: not now)
         self._status = None                             # (path, every, options) from status_file()
+        self._q_state, self._q_gen = '', 0
         self.q = None
         self._last_rx = 0.0
 
@@ -235,6 +249,7 @@ class Bot:
         keepalive = asyncio.ensure_future(self._keepalive(writer))
         self.nick, self.caps, self.channels = self.want_nick, set(), CaseDict(self.casemap)
         self._sasl_done = not self.sasl
+        self._q_state, self._q_gen, self.account = '', getattr(self, '_q_gen', 0) + 1, ''
         self._last_rx = time.monotonic()                  # the keepalive counts from the connection's start
         throttled = False
         try:
@@ -299,9 +314,17 @@ class Bot:
             self.nick = msg.arg(0, self.nick)
         elif c == '005':
             self._isupport(p[1:-1])
-        elif c in ('376', '422'):                          # the end of the welcome: join
-            for ch in self.channels_wanted:
-                self.join(ch)
+        elif c in ('376', '422'):                          # the end of the welcome
+            if self.q_auth:
+                self._q_start()                            # log in to Q first; join after (see _q)
+            else:
+                self._join_all()
+        elif c == 'NOTICE' and self.q_auth and equal(msg.nick, 'Q', self.casemap) and \
+                msg.host.lower() == 'cserve.quakenet.org':
+            self._q(msg.text)
+        elif c == '396' and self._q_state == 'hiding':      # the hidden host is in place: now join
+            self._q_state = 'done'
+            self._join_all()
         elif c == '433' and not self.connected:            # the nick is taken
             self.nick = (self.nick + '_')[:15] if len(self.nick) < 15 else self.nick[:-1] + str(random.randint(0, 9))
             self.send(build('NICK', self.nick), urgent=True)
@@ -336,6 +359,55 @@ class Bot:
                 await fn(self, msg)
             except Exception:
                 log.exception('a handler for %s failed', c)
+
+    # ---- QuakeNet's Q ----
+    def _join_all(self):
+        for ch in self.channels_wanted:
+            self.join(ch)
+
+    def _q_start(self):
+        self._q_state = 'challenge'
+        self.say('Q@CServe.quakenet.org', 'CHALLENGE')
+        asyncio.get_event_loop().call_later(30, self._q_timeout, self._q_gen)
+
+    def _q(self, text):
+        """Q's answers: the challenge, then logged in (or not)."""
+        words = text.split()
+        if self._q_state == 'challenge' and words[:1] == ['CHALLENGE'] and len(words) > 2:
+            if 'HMAC-SHA-256' not in words[2:]:
+                return self._q_failed('Q does not offer HMAC-SHA-256')
+            account, password = self.q_auth
+            self._q_state = 'auth'
+            self.say('Q@CServe.quakenet.org', 'CHALLENGEAUTH %s %s HMAC-SHA-256' % (
+                account, q_response(account, password, words[1])))
+        elif self._q_state == 'auth' and text.startswith('You are now logged in as'):
+            self.account = words[-1].rstrip('.')
+            log.info('logged in to Q as %s', self.account)
+            if self.hide_host:
+                self._q_state = 'hiding'
+                self.send(build('MODE', self.nick, '+x'))
+            else:
+                self._q_state = 'done'
+                self._join_all()
+        elif self._q_state == 'auth' and ('incorrect' in text.lower() or 'suspended' in text.lower()):
+            self._q_failed('Q said: %s' % text)
+
+    def _q_failed(self, why):
+        self._q_state = 'failed'
+        if self.q_required:
+            log.error('Q login failed (%s); not joining, as q_required is set', why)
+        else:
+            log.warning('Q login failed (%s); joining without it (the real host shows)', why)
+            self._join_all()
+
+    def _q_timeout(self, gen):
+        if gen == self._q_gen and self._q_state in ('challenge', 'auth', 'hiding'):
+            if self._q_state == 'hiding':               # logged in, but no 396: join anyway
+                log.warning('no hidden host after 30 s; joining')
+                self._q_state = 'done'
+                self._join_all()
+            else:
+                self._q_failed('Q did not answer in 30 s')
 
     async def _cap(self, msg):
         sub = msg.arg(1).upper()

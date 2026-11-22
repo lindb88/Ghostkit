@@ -216,6 +216,82 @@ class TestBot(unittest.TestCase):
                 await s.stop()
         self.run_async(go())
 
+    def test_quakenet_q_login_hides_the_host_before_joining(self):
+        async def go():
+            s = await IRCServer('quakenet').start()
+            s.add_account('BotAcct', 'secretpassword')
+            joined_host = {}
+            orig = s.on_line
+
+            def watch(nick, line):
+                if line.upper().startswith('JOIN') and nick == 'TestBot':
+                    joined_host.setdefault('host', s.client('TestBot').host)
+                if orig:
+                    orig(nick, line)
+            s.on_line = watch
+            bot = make_bot(s.port, q_auth=('BotAcct', 'secretpassword'))
+            task = asyncio.ensure_future(bot.run_forever())
+            try:
+                await until(lambda: s.chan('#test') and 'testbot' in s.chan('#test').members, 15)
+                self.assertEqual(bot.account, 'BotAcct')
+                self.assertEqual(joined_host['host'], 'BotAcct.users.quakenet.org')   # hidden before the join
+                self.assertFalse(any('secretpassword' in line for _, line in s.received))  # never sent
+            finally:
+                bot.stop()
+                task.cancel()
+                await s.stop()
+        self.run_async(go())
+
+    def test_quakenet_wrong_password(self):
+        async def go():
+            s = await IRCServer('quakenet').start()
+            s.add_account('BotAcct', 'secretpassword')
+            # q_required: stays out of channels
+            strict = make_bot(s.port, nick='Strict', q_auth=('BotAcct', 'wrong'), q_required=True)
+            # default: joins anyway, unhidden
+            loose = make_bot(s.port, nick='Loose', q_auth=('BotAcct', 'wrong'))
+            tasks = [asyncio.ensure_future(b.run_forever()) for b in (strict, loose)]
+            try:
+                await until(lambda: s.chan('#test') and 'loose' in s.chan('#test').members, 15)
+                await asyncio.sleep(1)
+                self.assertNotIn('strict', s.chan('#test').members)
+                self.assertEqual((strict.account, loose.account), ('', ''))
+            finally:
+                for b in (strict, loose):
+                    b.stop()
+                for t in tasks:
+                    t.cancel()
+                await s.stop()
+        self.run_async(go())
+
+    def test_a_fake_q_is_ignored(self):
+        async def go():
+            s = await IRCServer('plain').start()
+            bot = make_bot(s.port, q_auth=('BotAcct', 'pw'), hide_host=False)
+            import irctools.client as C
+            task = asyncio.ensure_future(bot.run_forever())
+            try:
+                await until(lambda: bot.connected and bot._q_state == 'challenge', 10)
+                faker = User('Q')                        # a user called Q, not the real one (CServe)
+                await faker.connect(s.port)
+                faker.notice('TestBot', 'You are now logged in as Someone.')
+                faker.notice('TestBot', 'CHALLENGE abc HMAC-SHA-256')
+                await asyncio.sleep(1)
+                self.assertEqual((bot.account, bot._q_state), ('', 'challenge'))
+                self.assertFalse(s.chan('#test'))
+                faker.close()
+            finally:
+                bot.stop()
+                task.cancel()
+                await s.stop()
+        self.run_async(go())
+
+    def test_q_response_matches_quakenet(self):
+        from irclab import q_expected
+        from irctools.client import q_response
+        self.assertEqual(q_response('Bot[1]', 'a long password', 'abc123'), q_expected('Bot[1]', 'a long password', 'abc123'))
+        self.assertEqual(q_response('bot{1}', 'a long passXXX', 'abc123'), q_expected('Bot[1]', 'a long password', 'abc123'))
+
     def test_reconnects_and_rejoins(self):
         async def go():
             s = await IRCServer('plain').start()
