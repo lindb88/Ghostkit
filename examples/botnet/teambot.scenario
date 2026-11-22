@@ -1,0 +1,25 @@
+# The simplest botnet: python3 -m irclab run examples/botnet/teambot.scenario
+bot python3 teambot.py --port {port} --nick Team1 --team Team1,Team2
+bot python3 teambot.py --port {port} --nick Team2 --team Team1,Team2
+wait Team1 in #test
+wait Team2 in #test
+
+user Alice
+Alice join #test
+Alice say #test !hello
+expect Alice from Team1 in #test "Hello, Alice! (from Team1)"
+# only one answers
+refute Alice from Team2 in #test for 2
+
+# Team1's machine goes down: Team2 takes over by itself
+stopbot 1
+wait Team1 out #test
+Alice say #test !hello
+expect Alice from Team2 in #test "Hello, Alice! (from Team2)"
+
+# Team1 is back: it answers again, and Team2 stays quiet
+bot python3 teambot.py --port {port} --nick Team1 --team Team1,Team2
+wait Team1 in #test
+Alice say #test !hello
+expect Alice from Team1 in #test "(from Team1)"
+refute Alice from Team2 in #test for 2

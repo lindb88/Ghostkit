@@ -64,7 +64,8 @@ Quotes group words: `"two words"` or `'say "hi"'`.
 | `server plain\|libera\|quakenet` | the network's kind (first line, if at all; `plain` when left out) |
 | `account <name> <password>` | a services account (libera, quakenet) |
 | `chanlev <#chan> <account> <flags>` | services access in a channel: ChanServ or Q gives op (`o`) and invite |
-| `bot <command> [args]` | start your bot; `{port}` and `{host}` are the server's |
+| `bot <command> [args]` | start your bot; `{port}` and `{host}` are the server's. Several `bot` lines start several bots (a botnet), numbered 1, 2, ... |
+| `stopbot <n>` | stop bot n at once, as if its machine went down |
 | `user <nick> [ident]` | a user connects; their host is `<ident>.host` (`alice.host`) |
 | `<nick> join <#chan> [key]` | |
 | `<nick> part <#chan>` | |
@@ -76,6 +77,8 @@ Quotes group words: `"two words"` or `'say "hi"'`.
 | `<nick> identify <account> <password>` | log in with NickServ (libera) |
 | `<nick> qauth <account> <password>` | log in with Q's CHALLENGEAUTH (quakenet) |
 | `wait <nick> online` | until that nick is connected |
+| `wait <nick> offline` | until it is not |
+| `wait <nick> out <#chan>` | until it is not in the channel |
 | `wait <nick> in <#chan>` | until it is in the channel |
 | `wait <nick> op <#chan>` | until it has ops there |
 | `expect <user> from <nick> [in <#chan> \| private] [notice] [<text>]` | the user gets a message from nick (containing the text) |

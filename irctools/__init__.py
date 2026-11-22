@@ -10,11 +10,11 @@ Taken from ghostbot, where they run a botnet. Part of ghostkit (MIT license). Se
 """
 
 from .casemap import CaseDict, equal, lower
-from .client import Bot, Context
+from .client import Bot, Context, q_password_hash, q_response
 from .masks import ban_mask, is_channel, match
 from .message import Message, build, clean, parse, split_text
 from .sendq import SendQueue
 
 __version__ = '0.1.1'
 __all__ = ['Bot', 'Context', 'Message', 'parse', 'build', 'clean', 'split_text', 'lower', 'equal', 'CaseDict',
-           'match', 'ban_mask', 'is_channel', 'SendQueue', '__version__']
+           'match', 'ban_mask', 'is_channel', 'SendQueue', 'q_password_hash', 'q_response', '__version__']

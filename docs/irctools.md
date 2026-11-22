@@ -40,7 +40,9 @@ documents it: the password itself is never sent), sets `+x` so its host
 becomes `MyAccount.users.quakenet.org`, and only then joins its channels,
 so its real address never shows in them. If the login fails, it joins
 anyway and logs a warning; with `q_required=True` it stays out instead.
-`hide_host=False` skips `+x`. Only notices from the real Q
+`hide_host=False` skips `+x`. To keep the password out of the bot's
+config, store only what Q's login needs: `q_auth=('MyAccount', 'sha256:' +
+q_password_hash(password))`; see [quakenet.md](quakenet.md). Only notices from the real Q
 (`Q!TheQBot@CServe.quakenet.org`) count, not from someone who takes the
 nick Q on another network.
 

@@ -116,6 +116,9 @@ class TestSendQueue(unittest.TestCase):
         self.assertGreater(w.times[4] - w.times[0], 0.5)
 
 
+Q_VECTOR = '5a22a183e2189e27b0c78a69b5315d04a0492796ad29c3f99dee288eb33b8781'
+
+
 def make_bot(port, **kw):
     kw.setdefault('channels', ['#test'])
     return Bot(kw.pop('nick', 'TestBot'), '127.0.0.1', port, interval=0.02, burst=50, **kw)
@@ -291,6 +294,11 @@ class TestBot(unittest.TestCase):
         from irctools.client import q_response
         self.assertEqual(q_response('Bot[1]', 'a long password', 'abc123'), q_expected('Bot[1]', 'a long password', 'abc123'))
         self.assertEqual(q_response('bot{1}', 'a long passXXX', 'abc123'), q_expected('Bot[1]', 'a long password', 'abc123'))
+        from irctools import q_password_hash
+        hashed = 'sha256:' + q_password_hash('a long password')
+        self.assertEqual(q_response('Bot[1]', hashed, 'abc123'), q_expected('Bot[1]', 'a long password', 'abc123'))
+        # the fixed example in docs/quakenet.md, for checking an implementation in any language
+        self.assertEqual(q_response('MyAccount', 'correcthorse', 'f2a4c8b0e1d3a5c7f9e2b4d6a8c0e1f3'), Q_VECTOR)
 
     def test_reconnects_and_rejoins(self):
         async def go():

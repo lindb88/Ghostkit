@@ -19,10 +19,12 @@ One step per line; a line starting with # is a comment (a # later on is a channe
   server <mode>                         plain (default), libera or quakenet; first, if at all
   account <name> <password>             a services account (libera, quakenet)
   chanlev <#chan> <account> <flags>     services access in a channel (ChanServ / Q op and invite)
-  bot <command> [args]                  start the bot; {port} and {host} are the server's; its output is
+  bot <command> [args]                  start a bot; {port} and {host} are the server's; its output is
                                         kept and shown when a step fails. It runs in the scenario's
                                         folder; words are taken as the scenario reads them (quotes group,
-                                        no pipes or &&: for more, start a script)
+                                        no pipes or &&: for more, start a script). Several bot lines
+                                        start several bots (a botnet); they are numbered 1, 2, ...
+  stopbot <n>                           stop bot n (as if its machine went down), to test the others
   user <nick> [ident]                   a user connects (its host is <ident>.host)
   <nick> join <#chan> [key]             ... and the other things a user does:
   <nick> part <#chan> | say <target> <text> | notice <target> <text> | send <raw line>
@@ -30,6 +32,8 @@ One step per line; a line starting with # is a comment (a # later on is a channe
   wait <nick> in <#chan>                until that nick (the bot) is in the channel
   wait <nick> op <#chan>                until it has ops there
   wait <nick> online                    until it is connected
+  wait <nick> offline                   until it is not connected
+  wait <nick> out <#chan>               until it is not in the channel
   expect <user> from <nick> [in <#chan> | private] [notice] [<text>]
                                         the user gets a message from nick (containing text)
   refute <user> from <nick> [in <#chan> | private] [<text>] for <seconds>
@@ -87,8 +91,7 @@ class Runner:
         self.on_server, self.env = on_server, env
         self.server = None
         self.users = {}
-        self.bot = None
-        self.botlog = None
+        self.bots = []                                 # each: {'n', 'cmd', 'proc', 'log', 'stopped'}
 
     async def run(self):
         mode = 'plain'
@@ -110,9 +113,11 @@ class Runner:
                     self.out('not ok %d - %s (line %d)' % (i, label, n))
                     for l in str(e).splitlines() or ['(no detail)']:
                         self.out('#   ' + l)
-                    self.out('#   --- the bot\'s last output ---')
-                    for l in self.bot_tail():
-                        self.out('#   ' + l)
+                    for b in self.bots or [None]:
+                        self.out('#   --- %s ---' % ("the bot's last output" if b is None or len(self.bots) == 1
+                                                    else "bot %d's last output (%s)" % (b['n'], b['cmd'][:60])))
+                        for l in self.bot_tail(b):
+                            self.out('#   ' + l)
                     break                              # later steps build on this one
         finally:
             await self.close()
@@ -120,11 +125,11 @@ class Runner:
         self.out('%d of %d passed%s' % (passed, len(self.steps), ', %d not run' % skipped if skipped else ''))
         return failed == 0
 
-    def bot_tail(self, n=15):
-        if not self.botlog:
+    def bot_tail(self, b, n=15):
+        if b is None:
             return ['(no bot started)']
         try:
-            with open(self.botlog.name, errors='replace') as f:
+            with open(b['log'].name, errors='replace') as f:
                 return f.read().splitlines()[-n:] or ['(nothing yet)']
         except OSError:
             return ['(no output)']
@@ -140,11 +145,18 @@ class Runner:
             s.set_chanlev(toks[1], toks[2], toks[3])
         elif word == 'bot':
             cmd = ' '.join(shlex.quote(t.replace('{port}', str(s.port)).replace('{host}', '127.0.0.1')) for t in toks[1:])
-            self.botlog = tempfile.NamedTemporaryFile('w', prefix='irclab-bot-', suffix='.log', delete=False)
+            log = tempfile.NamedTemporaryFile('w', prefix='irclab-bot-', suffix='.log', delete=False)
             env = dict(os.environ, **(self.env or {}))
-            self.bot = subprocess.Popen(cmd, shell=True, cwd=self.base, env=env, stdout=self.botlog,
-                                        stderr=subprocess.STDOUT,
-                                        stdin=subprocess.DEVNULL, start_new_session=True)
+            proc = subprocess.Popen(cmd, shell=True, cwd=self.base, env=env, stdout=log, stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL, start_new_session=True)
+            self.bots.append({'n': len(self.bots) + 1, 'cmd': ' '.join(toks[1:]), 'proc': proc, 'log': log,
+                              'stopped': False})
+        elif word == 'stopbot':
+            if len(toks) < 2 or not toks[1].isdigit() or not 1 <= int(toks[1]) <= len(self.bots):
+                raise StepFailed('stopbot <n>: n from 1 to %d (the bots started so far)' % len(self.bots))
+            b = self.bots[int(toks[1]) - 1]
+            b['stopped'] = True
+            await self.stop(b, hard=True)
         elif word == 'user':
             u = User(toks[1], toks[2] if len(toks) > 2 else None)
             await u.connect(s.port)
@@ -156,6 +168,12 @@ class Runner:
             nick, what = toks[1], toks[2]
             if what == 'online':
                 await self.wait(lambda: s.client(nick), within, '%s to connect' % nick)
+            elif what == 'offline':
+                await self.wait(lambda: not s.client(nick), within, '%s to be gone' % nick)
+            elif what == 'out':
+                chan = toks[3]
+                await self.wait(lambda: not (s.chan(chan) and low(nick) in s.chan(chan).members), within,
+                                '%s to leave %s' % (nick, chan))
             elif what in ('in', 'op'):
                 chan = toks[3]
                 if what == 'in':
@@ -165,7 +183,7 @@ class Runner:
                 await self.wait(ok, within, '%s %s %s' % (nick, 'to be in' if what == 'in' else 'to have ops in',
                                                           chan))
             else:
-                raise StepFailed('wait: in, op or online?')
+                raise StepFailed('wait: in, out, op, online or offline?')
         elif word in ('expect', 'refute'):
             await self.check(word, toks)
         elif low(word) in self.users:
@@ -173,14 +191,22 @@ class Runner:
         else:
             raise StepFailed('what is "%s"? (a step, or a user made with: user %s)' % (word, word))
 
+    def exited(self):
+        """Why a bot that should be running is not, or None."""
+        for b in self.bots:
+            if not b['stopped'] and b['proc'].poll() is not None:
+                who = 'the bot' if len(self.bots) == 1 else 'bot %d' % b['n']
+                return '%s has exited (status %s)' % (who, b['proc'].returncode)
+        return None
+
     async def wait(self, cond, within, what):
-        if self.bot is not None and self.bot.poll() is not None:
-            raise StepFailed('the bot has exited (status %s)' % self.bot.returncode)
+        if self.exited():
+            raise StepFailed(self.exited())
         try:
             await until(cond, within, what)
         except AssertionError:
-            if self.bot is not None and self.bot.poll() is not None:
-                raise StepFailed('the bot exited (status %s) while waiting for %s' % (self.bot.returncode, what))
+            if self.exited():
+                raise StepFailed('%s while waiting for %s' % (self.exited(), what))
             raise StepFailed('timed out after %gs waiting for %s' % (within, what))
 
     async def act(self, u, toks):
@@ -229,8 +255,8 @@ class Runner:
             kind, rest = 'NOTICE', rest[1:]
         text = ' '.join(rest) or None
         if word == 'expect':
-            if self.bot is not None and self.bot.poll() is not None:
-                raise StepFailed('the bot has exited (status %s)' % self.bot.returncode)
+            if self.exited():
+                raise StepFailed(self.exited())
             await u.reply(frm, text, kind=kind, timeout=within, where=where)
             return
         u.mark()
@@ -242,27 +268,37 @@ class Runner:
                     (text is None or text in l.text):
                 raise StepFailed('it did say: %s (%.1fs in)' % (l.raw, time.time() - start))
 
+    async def stop(self, b, hard=False):
+        """End a bot's whole process group: SIGKILL at once when hard (a machine going down), else TERM first."""
+        p = b['proc']
+        if p.poll() is not None:
+            return
+        try:
+            if not hard:
+                os.killpg(p.pid, signal.SIGTERM)
+                for _ in range(20):
+                    if p.poll() is not None:
+                        return
+                    await asyncio.sleep(0.1)
+            os.killpg(p.pid, signal.SIGKILL)
+            for _ in range(20):
+                if p.poll() is not None:
+                    break
+                await asyncio.sleep(0.05)
+        except (ProcessLookupError, PermissionError):
+            pass
+
     async def close(self):
         for u in list(self.users.values()):
             u.close()
-        if self.bot is not None and self.bot.poll() is None:
-            try:
-                os.killpg(self.bot.pid, signal.SIGTERM)
-                for _ in range(20):
-                    if self.bot.poll() is not None:
-                        break
-                    await asyncio.sleep(0.1)
-                if self.bot.poll() is None:
-                    os.killpg(self.bot.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
-        if self.botlog:
-            self.botlog.close()
+        for b in self.bots:
+            await self.stop(b)
+            b['log'].close()
             if self.verbose:
-                self.out('# the bot\'s output: %s' % self.botlog.name)
+                self.out('# bot %d\'s output: %s' % (b['n'], b['log'].name))
             else:
                 try:
-                    os.unlink(self.botlog.name)
+                    os.unlink(b['log'].name)
                 except OSError:
                     pass
         if self.server:

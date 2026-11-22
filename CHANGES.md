@@ -10,6 +10,20 @@
   is joined, only the real Q believed; `q_required=True` stays out of
   channels when the login fails. The echo bot has `--q-account` (the
   password from `$Q_PASSWORD`).
+- irctools: `q_password_hash()`, so a bot can store only the hash Q's login
+  needs (`q_auth=('Account', 'sha256:<hex>')`), not the password.
+- irclab: several bots in one scenario (each `bot` line starts another),
+  `stopbot <n>` to stop one as if its machine went down, and `wait <nick>
+  offline` / `wait <nick> out <#chan>`. A bot that dies is named in the
+  failure.
+- Guides for any language: **docs/botnet.md** (from one bot to a linked
+  botnet: who answers, links with a pinned certificate and a shared-secret
+  login, shared data, placing bots, safe updates, the networks' rules) and
+  **docs/quakenet.md** (connecting, the 5-per-address limit, Q accounts,
+  CHALLENGEAUTH with a worked example, the hidden host, CHANLEV, eggdrops).
+  Both have fixed examples to check an implementation against.
+- examples/botnet/teambot.py: the simplest botnet, two bots where one
+  answers and the other takes over when it goes, tested with irclab.
 - **webstatus**: a status page for a bot in any language. The bot writes
   `status.json`; one self-contained HTML file shows its bots, connection
   times, channels and user counts, warns when the file is old, and refreshes

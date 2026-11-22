@@ -43,9 +43,19 @@ CAPS_WANTED = ('account-tag', 'extended-join', 'multi-prefix', 'away-notify', 'a
                'message-tags')
 
 
+def q_password_hash(password):
+    """What Q's login really needs: SHA-256 of the password's first 10 characters, in hex. Store this in a bot's
+    config instead of the password: q_auth=('Account', 'sha256:' + q_password_hash(password))."""
+    return hashlib.sha256(password[:10].encode()).hexdigest()
+
+
 def q_response(account, password, challenge):
-    """QuakeNet's CHALLENGEAUTH answer with HMAC-SHA-256 (as documented by QuakeNet): the password is never sent."""
-    passhash = hashlib.sha256(password[:10].encode()).hexdigest()
+    """QuakeNet's CHALLENGEAUTH answer with HMAC-SHA-256 (as documented by QuakeNet): the password is never sent.
+    password may be 'sha256:<hex>' from q_password_hash()."""
+    if password.startswith('sha256:') and len(password) == 71:
+        passhash = password[7:].lower()
+    else:
+        passhash = q_password_hash(password)
     key = hashlib.sha256((lower(account) + ':' + passhash).encode()).hexdigest()
     return hmac.new(key.encode(), challenge.encode(), hashlib.sha256).hexdigest()
 

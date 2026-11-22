@@ -167,6 +167,34 @@ class TestScenario(unittest.TestCase):
             ok, out = run_scenario(f.read(), os.path.join(ROOT, 'examples', 'go'))
         self.assertTrue(ok, '\n'.join(out))
 
+    def test_teambot_botnet_takeover(self):
+        with open(os.path.join(ROOT, 'examples', 'botnet', 'teambot.scenario')) as f:
+            ok, out = run_scenario(f.read(), os.path.join(ROOT, 'examples', 'botnet'))
+        self.assertTrue(ok, '\n'.join(out))
+
+    def test_several_bots_and_stopbot(self):
+        text = ('bot python3 echobot.py --port {port} --fast --nick One --channel #test\n'
+                'bot python3 echobot.py --port {port} --fast --nick Two --channel #test\n'
+                'wait One in #test\nwait Two in #test\n'
+                'stopbot 2\nwait Two offline\nwait Two out #test\n'
+                'user Alice\nAlice join #test\nAlice say #test !hello\n'
+                'expect Alice from One in #test "Hello, Alice!"\n'
+                'stopbot 3\n')
+        ok, out = run_scenario(text)
+        self.assertFalse(ok)                                       # stopbot 3: there is no third bot
+        self.assertIn('stopbot <n>: n from 1 to 2', '\n'.join(out))
+        self.assertTrue(out[-1].startswith('11 of 12 passed'), out[-1])
+
+    def test_a_bot_that_dies_is_named(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'ok.py'), 'w') as f:
+                f.write('import time\ntime.sleep(30)\n')
+            with open(os.path.join(d, 'dies.py'), 'w') as f:
+                f.write('raise SystemExit(3)\n')
+            ok, out = run_scenario('bot python3 ok.py\nbot python3 dies.py\nsleep 1\nwait Nobody online within 3\n', d)
+        self.assertFalse(ok)
+        self.assertIn('bot 2 has exited (status 3)', '\n'.join(out))
+
     def test_command_line(self):
         r = subprocess.run([sys.executable, '-m', 'irclab', 'run', os.path.join('examples', 'echobot.scenario')],
                            cwd=ROOT, capture_output=True, text=True, timeout=90)
