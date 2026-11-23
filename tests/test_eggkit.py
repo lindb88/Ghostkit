@@ -22,7 +22,8 @@ TCLSH = os.environ.get('TCLSH') or next(
 OPENSSL = shutil.which('openssl')
 CURL = shutil.which('curl')
 
-# RFC 8032, section 7.1, tests 1 and 2
+# RFC 8032, section 7.1: tests 1, 2, 3 and SHA(abc)
+L = 2 ** 252 + 27742317777372353535851937790883648493
 VECTORS = [
     ('9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60',
      'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a', '',
@@ -30,7 +31,20 @@ VECTORS = [
     ('4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb',
      '3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c', '72',
      '92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00'),
+    ('c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7',
+     'fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025', 'af82',
+     '6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a'),
+    ('833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42',
+     'ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf',
+     'ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f',
+     'dc2a4459e7369633a52b1bf277839a00201009a3efbf3ecb69bea2186c26b58909351fc9ac90b3ecfdfbc7c66431e0303dca179c138ac17ad9bef1177331a704'),
 ]
+
+
+def malleated(sig_hex):
+    """The same signature with S + L: the same point equation, but not the one valid encoding (RFC 8032 5.1.7)."""
+    sig = bytes.fromhex(sig_hex)
+    return (sig[:32] + (int.from_bytes(sig[32:], 'little') + L).to_bytes(32, 'little')).hex()
 
 
 def tcl(script, path_env=None, cwd=None):
@@ -58,6 +72,8 @@ class TestSignPy(unittest.TestCase):
             self.assertEqual(sign.sign(secret, bytes.fromhex(msg)).hex(), sig)
             self.assertTrue(sign.verify(bytes.fromhex(pk), bytes.fromhex(msg), bytes.fromhex(sig)))
             self.assertFalse(sign.verify(bytes.fromhex(pk), b'x' + bytes.fromhex(msg), bytes.fromhex(sig)))
+            self.assertFalse(sign.verify(bytes.fromhex(pk), bytes.fromhex(msg), bytes.fromhex(malleated(sig))))
+            self.assertFalse(sign.verify(bytes.fromhex(pk), bytes.fromhex(msg), bytes.fromhex(sig) + b'\0'))
 
     @unittest.skipUnless(OPENSSL, 'no openssl')
     def test_openssl_agrees(self):
@@ -111,7 +127,8 @@ class TestTclEd25519(unittest.TestCase):
                       'puts [::eggkit::ed25519::verify_hex %s "x" %s]' % (pk, sig),
                       'puts [::eggkit::ed25519::verify_hex %s %s %s]' % (pk, m, bad_sig),
                       'puts [::eggkit::ed25519::verify_hex nothex %s %s]' % (m, sig)]
-        self.assertEqual(tcl('\n'.join(lines)).split(), ['1', '0', '0', '0'] * 2)
+            lines.append('puts [::eggkit::ed25519::verify_hex %s %s %s]' % (pk, m, malleated(sig)))
+        self.assertEqual(tcl('\n'.join(lines)).split(), ['1', '0', '0', '0', '0'] * len(VECTORS))
 
     def test_python_signs_tcl_checks(self):
         secret = os.urandom(32)
@@ -254,6 +271,90 @@ class TestUpdater(unittest.TestCase):
     def test_missing_file(self):
         result, rehashed, now = self.check()                          # nothing published
         self.assertTrue(result.startswith('failed|could not fetch it'), result)
+
+
+@unittest.skipUnless(TCLSH, 'no tclsh')
+class TestTclFetch(unittest.TestCase):
+    """0.1.3: Tcl's http package (no curl): the size limit holds while the data comes in, and https checks the
+    server's certificate against this machine's CA certificates."""
+
+    NO_CURL = 'proc auto_execok {name} { return "" }\n'      # as on a machine without curl
+
+    def serve_big(self):
+        import http.server
+        import threading
+
+        class Big(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                if self.path.endswith('/withlen'):
+                    self.send_header('Content-Length', str(30 * 1024 * 1024))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                try:
+                    for _ in range(480):                      # 30 MB
+                        self.wfile.write(b'x' * 65536)
+                except OSError:
+                    pass
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Big)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.shutdown)
+        return srv.server_port
+
+    def test_the_limit_holds_while_receiving(self):
+        port = self.serve_big()
+        script = self.NO_CURL + (
+            'rename ::eggkit::update::http_done ::eggkit::update::http_done_orig\n'
+            'proc ::eggkit::update::http_done {maxsize cmd tok} {\n'
+            '  puts "held [string length [::http::data $tok]]"\n'
+            '  ::eggkit::update::http_done_orig $maxsize $cmd $tok\n'
+            '}\n'
+            'proc done {ok data} { puts "ok=$ok $data"; set ::finished 1 }\n'
+            'foreach p {/nolen /withlen} {\n'
+            '  ::eggkit::update::fetch http://127.0.0.1:%d$p 2000000 done 1\n'
+            '  vwait finished\n'
+            '}\n' % port)
+        out = tcl(script).splitlines()
+        held = [int(l.split()[1]) for l in out if l.startswith('held')]
+        self.assertEqual([l for l in out if l.startswith('ok=')], ['ok=0 it is larger than allowed'] * 2, out)
+        self.assertTrue(all(h <= 2000000 + 65536 for h in held), held)       # before: all 30 MB
+
+    def fake_tls(self, d):
+        """A stand-in tls package that records how it is asked to connect (the real one is not needed)."""
+        os.makedirs(os.path.join(d, 'tls'))
+        with open(os.path.join(d, 'tls', 'pkgIndex.tcl'), 'w') as f:
+            f.write('package ifneeded tls 9.9 [list source [file join $dir tls.tcl]]\n')
+        with open(os.path.join(d, 'tls', 'tls.tcl'), 'w') as f:
+            f.write('namespace eval ::tls {}\n'
+                    'proc ::tls::socket {args} { set ::tls_args $args; error "fake tls" }\n'
+                    'package provide tls 9.9\n')
+
+    def test_https_checks_the_certificate(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.fake_tls(d)
+            ca = os.path.join(d, 'ca.pem')
+            open(ca, 'w').write('not used by the fake\n')
+            script = self.NO_CURL + (
+                'lappend auto_path {%s}\n'
+                'set ::eggkit::update::cafile {%s}\n'
+                'proc done {ok data} { set ::finished 1 }\n'
+                '::eggkit::update::fetch https://127.0.0.1:1/x 1000 done\n'
+                'vwait finished\n'
+                'puts $::tls_args\n'
+                'set ::eggkit::update::cafile ""; set ::eggkit::update::cafiles {/no/such/file}\n'
+                'proc done2 {ok data} { puts "ok=$ok $data"; set ::finished 1 }\n'
+                '::eggkit::update::fetch https://127.0.0.1:1/x 1000 done2\n'
+                'vwait finished\n' % (d, ca))
+            out = tcl(script).splitlines()
+            args = out[0].split()
+            self.assertIn('-require', args)
+            self.assertEqual(args[args.index('-require') + 1], '1')
+            self.assertEqual(args[args.index('-cafile') + 1], ca)
+            self.assertEqual(out[1], 'ok=0 no CA certificates found for the tls package '
+                                     '(set ::eggkit::update::cafile, or install curl)')
 
 
 @unittest.skipUnless(TCLSH, 'no tclsh')
