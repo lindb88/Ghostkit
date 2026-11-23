@@ -80,7 +80,7 @@ Any language can do this with what it has built in:
   Take the fingerprint from the hub's own machine
   (`openssl x509 -in hub.crt -outform DER | sha256sum`), not from the first
   connection, or whoever sits in the middle at that moment gets pinned
-  (see [security.md](security.md), point 5).
+  (see [security.md](security.md), point 6).
 - **One JSON object per line**, each with a type field: easy to read and
   write in every language, and easy to log while debugging.
 
@@ -117,8 +117,14 @@ Any language can do this with what it has built in:
   minutes), with some randomness, so a restarted hub is not hit by every
   leaf at the same moment.
 - **Limit what a link can do.** A leaf obeys orders only from the hub, never
-  from another leaf; the hub checks that a leaf only reports about itself.
-  Then one stolen leaf cannot command the others.
+  from another leaf; the hub obeys no orders from leaves; the hub checks
+  that a leaf only reports about itself, and decides itself which bots have
+  special roles. Then one confused leaf cannot command the others.
+- **Know what one shared secret means.** If every bot proves the same
+  secret, a bot that holds it can log in under any name. The checks above
+  stop mistakes and limit the damage; against a stolen secret, only a new
+  secret on every bot helps. Per-bot secrets (the hub keeps one per name)
+  bind a name to a secret, at the cost of more setup.
 - **Harden the hub's port**, which is open to the internet:
   - the same answer for a wrong name and a wrong secret, a second later;
   - only a few logins waiting at once from one address (and in all), each
@@ -132,7 +138,7 @@ Any language can do this with what it has built in:
   nothing. Clean up only if the closing link is still the current one.
 
 Test the port itself, not only the client: [security.md](security.md),
-point 4, lists the cases (wrong and replayed logins, nonsense, huge lines,
+point 5, lists the cases (wrong and replayed logins, nonsense, huge lines,
 many idle connections, a link replaced).
 
 ## Who answers in a channel
@@ -155,6 +161,19 @@ same answer, even when links come and go.
   deleted, or a bot that was offline brings the deleted entry back.
 - A bot that joins with data of its own **merges** it rather than losing it.
 - Keep the machines' clocks right (NTP): "newest wins" needs clocks that agree.
+- **Refuse timestamps far ahead** of your own clock (ghostbot: more than 10
+  minutes) and anything that is not a real number: an entry dated next year
+  wins over every change until then, whether a clock is wrong or a bot
+  means harm. Log it, so the owner fixes the clock.
+- **Settle ties the same way everywhere.** Two bots can change an entry at
+  the same moment (two hubs during a split). If each keeps its own value
+  on equal timestamps, they never agree again; compare the values
+  themselves (for example their JSON with sorted keys) and keep the larger.
+- Table names from a link are plain words, and a link cannot create
+  unlimited tables (or files named after them).
+
+Test it: give two copies the same changes in different orders, repeated,
+and check they end equal.
 
 ## Placing bots in channels
 

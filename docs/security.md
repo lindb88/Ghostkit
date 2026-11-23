@@ -85,11 +85,44 @@ address on every try, and get around a "3 wrong passwords a minute" limit.
   unset X-Forwarded-For` (it then adds the real one), relayd `match request
   header set "X-Forwarded-For" value "$REMOTE_ADDR"`.
 - Anything that is not an IP address counts as the proxy itself.
+- Warn at start when the list of trusted proxies holds a public or very
+  large network: everyone there can then choose their address.
+- **Count the try before checking the password**, and take it back if the
+  password was right. A good password hash is slow on purpose, so a page
+  that counts only failures lets twenty logins sent at the same moment all
+  pass the limit before the first failure is counted. Allow one check per
+  username at a time, too.
 
 **Test it.** Send three wrong logins with `X-Forwarded-For: <new made-up
 address>, <the same real address>` and check that the fourth is refused.
+Then send sixteen wrong logins at once and check that at most three get a
+"wrong password" answer; the rest must be told to wait.
 
-## 4. Links between your bots
+## 4. Logins on a bot's web page
+
+**What goes wrong.** Someone's login is stolen (a shared computer, a copied
+cookie), and changing the password does not end it. Or another web site
+makes the visitor's browser send a request to the bot's page, with the
+visitor's cookie (cross-site request forgery).
+
+**What to do.**
+- Changing a password ends every other login of that account, on the web
+  and wherever else the bot keeps logins (on IRC too); the browser that
+  changed it stays logged in.
+- Show each login's start and when and from which address it was last used,
+  and let the owner end any of them.
+- The login cookie: `HttpOnly; Secure; SameSite=Strict`.
+- Accept only `Content-Type: application/json` for anything that changes
+  something, and only POST. A form on another site can send only
+  form-encoded data or plain text, and a script on another site cannot send
+  JSON without the browser asking your page first (which it should refuse:
+  send no `Access-Control-Allow-*` headers). GET never changes anything.
+
+**Test it.** Log in twice, change the password in one, and check the other
+is refused. For every POST route, send a form-encoded and a plain-text body
+with a valid cookie and check each is refused.
+
+## 5. Links between your bots
 
 docs/botnet.md describes a link: TLS with a pinned certificate, then a
 login that proves a shared secret. The login port is open to the internet,
@@ -105,6 +138,18 @@ so it needs more than correct cryptography:
 - **Limits on lines** (64 kB), and anything that is not the expected shape
   (not a JSON object, a name that is a list, a nonce of the wrong length)
   answered with an error, never an unhandled exception.
+- **Messages are data from outside, even after the login.** Accept only a
+  JSON object; refuse `NaN` and `Infinity` (many JSON libraries accept
+  them, and a `NaN` timestamp never compares as older); limit how deep it
+  nests (check without recursion, or a deep nest overflows the checker).
+  A message with a wrong type where a name or number belongs is logged
+  and skipped, not an exception that ends the link.
+- **Orders go one way.** Things only the hub may say (reload, reconnect,
+  "hand back", an update) are obeyed only from the hub, never from a leaf,
+  whichever bot the message claims to come from.
+- **Roles are not claimed.** If some links may do more (a gateway passing
+  on other bots' commands), the hub decides which names have that role; a
+  link saying "I am the gateway" is not enough.
 - **The replacement trap.** When a bot reconnects, the new connection
   replaces the old one, and the old one is closed. Its cleanup code then
   runs, and if it simply clears "this bot's connection", it clears the
@@ -114,10 +159,12 @@ so it needs more than correct cryptography:
 **Test it.** Open the real link port in a test and try each: a wrong
 secret, a wrong name, an old login replayed, a protocol number you do not
 speak, `[]`, `null`, a 100 kB line, ten idle connections, and two logins in
-a row (the second must keep working). ghostgate's `tests/test_ghostgate.py`
+a row (the second must keep working). After logging in: `NaN`, a list
+nested a thousand deep, a name that is a list, and a leaf sending an order
+only the hub may give. ghostgate's `tests/test_ghostgate.py`
 (class `LinkPort`) is a worked example.
 
-## 5. Pinning certificates
+## 6. Pinning certificates
 
 **What goes wrong.** Bots linked over TLS with their own certificates check
 each other by a pinned fingerprint. If a bot pins whatever it sees the
@@ -136,7 +183,7 @@ gets pinned instead.
   automatically.
 - On a mismatch, refuse to link and say so; never repin by yourself.
 
-## 6. Updates
+## 7. Updates
 
 **What goes wrong.** A bot that downloads new versions of itself runs
 whatever the server hands it, so a hacked web server owns every bot.
@@ -155,7 +202,7 @@ whatever the server hands it, so a hacked web server owns every bot.
 release, and a different program's signed release; each must be refused,
 and the installed version left as it was (eggkit's tests do this).
 
-## 7. Flooding
+## 8. Flooding
 
 **What goes wrong.** A command anyone can repeat fifty times a second gets
 the bot disconnected for flooding, or makes it flood others.
