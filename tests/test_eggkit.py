@@ -286,6 +286,15 @@ class TestTclFetch(unittest.TestCase):
 
         class Big(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
+                if self.path.startswith('/small'):              # an ordinary download, every byte value
+                    body = bytes(range(256)) * 1200
+                    self.send_response(200 if 'missing' not in self.path else 404)
+                    if 'nolen' not in self.path:
+                        self.send_header('Content-Length', str(len(body)))
+                    self.send_header('Connection', 'close')
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 self.send_response(200)
                 if self.path.endswith('/withlen'):
                     self.send_header('Content-Length', str(30 * 1024 * 1024))
@@ -307,10 +316,19 @@ class TestTclFetch(unittest.TestCase):
     def test_the_limit_holds_while_receiving(self):
         port = self.serve_big()
         script = self.NO_CURL + (
+            # what is held in memory, ours and http's, after every read and at the end
+            'proc held {tok} {\n'
+            '  set n [string length [::http::data $tok]]\n'
+            '  if {[info exists ::eggkit::update::bodies($tok)]} { incr n [string length $::eggkit::update::bodies($tok)] }\n'
+            '  puts "held $n"\n'
+            '}\n'
+            'rename ::eggkit::update::http_read ::eggkit::update::http_read_orig\n'
+            'proc ::eggkit::update::http_read {maxsize sock tok} {\n'
+            '  set n [::eggkit::update::http_read_orig $maxsize $sock $tok]; held $tok; return $n\n'
+            '}\n'
             'rename ::eggkit::update::http_done ::eggkit::update::http_done_orig\n'
             'proc ::eggkit::update::http_done {maxsize cmd tok} {\n'
-            '  puts "held [string length [::http::data $tok]]"\n'
-            '  ::eggkit::update::http_done_orig $maxsize $cmd $tok\n'
+            '  held $tok; ::eggkit::update::http_done_orig $maxsize $cmd $tok\n'
             '}\n'
             'proc done {ok data} { puts "ok=$ok $data"; set ::finished 1 }\n'
             'foreach p {/nolen /withlen} {\n'
@@ -320,7 +338,20 @@ class TestTclFetch(unittest.TestCase):
         out = tcl(script).splitlines()
         held = [int(l.split()[1]) for l in out if l.startswith('held')]
         self.assertEqual([l for l in out if l.startswith('ok=')], ['ok=0 it is larger than allowed'] * 2, out)
-        self.assertTrue(all(h <= 2000000 + 65536 for h in held), held)       # before: all 30 MB
+        self.assertTrue(held and all(h <= 2000000 + 65536 for h in held), max(held or [0]))   # before: 30 MB
+
+    def test_an_ordinary_download_arrives_whole(self):
+        port = self.serve_big()
+        script = self.NO_CURL + (
+            'proc done {ok data} { puts "ok=$ok [string length $data] [expr {$ok ? [binary encode hex [string range $data 250 261]] : $data}]"; set ::finished 1 }\n'
+            'foreach p {/small /smallnolen /small/missing} {\n'
+            '  ::eggkit::update::fetch http://127.0.0.1:%d$p 2000000 done 1\n'
+            '  vwait finished\n'
+            '}\n'
+            'puts "left [array size ::eggkit::update::bodies]"\n' % port)
+        out = tcl(script).splitlines()
+        self.assertEqual(out, ['ok=1 307200 fafbfcfdfeff000102030405'] * 2
+                         + ['ok=0 13 ok (HTTP 404)', 'left 0'])
 
     def fake_tls(self, d):
         """A stand-in tls package that records how it is asked to connect (the real one is not needed)."""

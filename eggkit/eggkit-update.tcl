@@ -186,9 +186,12 @@ namespace eval ::eggkit::update {
       }
       ::http::register https 443 [list ::tls::socket -autoservername 1 -require 1 {*}$ca]
     }
-    # 0.1.3: the size limit while the data comes in (-progress), not after all of it is in memory
-    if {[catch {::http::geturl $url -binary 1 -timeout 60000 -blocksize 65536 \
-                  -progress [list [namespace current]::http_progress $maxsize] \
+    # 0.1.3: the size limit holds while the data comes in, not after all of it is in memory. -handler reads
+    # the body itself, at most 64 kB at a time (-progress is not enough: Tcl 8.6's http reads the whole stated
+    # length, or a whole chunk, in one go before telling anyone). With -handler, http asks for HTTP/1.0, so no
+    # chunks.
+    if {[catch {::http::geturl $url -binary 1 -timeout 60000 \
+                  -handler [list [namespace current]::http_read $maxsize] \
                   -command [list [namespace current]::http_done $maxsize $cmd]} e]} {
       after 0 [list {*}$cmd 0 $e]
     }
@@ -206,9 +209,22 @@ namespace eval ::eggkit::update {
     return ""
   }
 
-  # stop the transfer as soon as it, or the length the server states, passes the limit
-  proc http_progress {maxsize tok total current} {
-    if {$current > $maxsize || $total > $maxsize} { ::http::reset $tok toolarge }
+  # the body so far, per request; the transfer stops as soon as it, or the length the server states, passes
+  # the limit (the reset waits until http has finished with this read)
+  variable bodies
+  proc http_read {maxsize sock tok} {
+    variable bodies
+    upvar #0 $tok state
+    if {![info exists bodies($tok)]} { set bodies($tok) "" }
+    if {[info exists bodies($tok,toolarge)]} { read $sock 65536; return 0 }
+    set block [read $sock 65536]
+    append bodies($tok) $block
+    if {[string length $bodies($tok)] > $maxsize || ([info exists state(totalsize)] && $state(totalsize) > $maxsize)} {
+      set bodies($tok,toolarge) 1
+      set bodies($tok) ""
+      after 0 [list catch [list ::http::reset $tok toolarge]]
+    }
+    return [string length $block]
   }
 
   proc pipe_read {ch buf maxsize cmd} {
@@ -230,9 +246,13 @@ namespace eval ::eggkit::update {
   }
 
   proc http_done {maxsize cmd tok} {
-    set status [::http::status $tok]; set code [::http::ncode $tok]; set body [::http::data $tok]
+    variable bodies
+    set status [::http::status $tok]; set code [::http::ncode $tok]
+    set body [expr {[info exists bodies($tok)] ? $bodies($tok) : ""}]
+    set big [info exists bodies($tok,toolarge)]
+    unset -nocomplain bodies($tok) bodies($tok,toolarge)
     ::http::cleanup $tok
-    if {$status eq "toolarge"} { return [{*}$cmd 0 "it is larger than allowed"] }
+    if {$big || $status eq "toolarge"} { return [{*}$cmd 0 "it is larger than allowed"] }
     if {$status ne "ok" || $code != 200} { return [{*}$cmd 0 "$status (HTTP $code)"] }
     if {[string length $body] > $maxsize} { return [{*}$cmd 0 "it is larger than allowed"] }
     {*}$cmd 1 $body
