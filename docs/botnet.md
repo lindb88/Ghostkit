@@ -187,6 +187,9 @@ same answer, even when links come and go.
   deleted, or a bot that was offline brings the deleted entry back.
 - A bot that joins with data of its own **merges** it rather than losing it.
 - Keep the machines' clocks right (NTP): "newest wins" needs clocks that agree.
+- **Send a whole table in pieces** when a bot links (ghostbot: about 512 kB
+  each). Each piece is an ordinary update, merged entry by entry, so older
+  bots take them as before, and no single message grows with the botnet.
 - **Refuse timestamps far ahead** of your own clock (ghostbot: more than 10
   minutes) and anything that is not a real number: an entry dated next year
   wins over every change until then, whether a clock is wrong or a bot

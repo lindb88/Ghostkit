@@ -111,7 +111,17 @@ visitor's cookie (cross-site request forgery).
   changed it stays logged in.
 - Show each login's start and when and from which address it was last used,
   and let the owner end any of them.
-- The login cookie: `HttpOnly; Secure; SameSite=Strict`.
+- The login cookie: `HttpOnly; Secure; SameSite=Strict`, and named with the
+  `__Host-` prefix (`__Host-session`, with `Path=/` and no `Domain`): a
+  browser then takes it only from your site itself over https, so another
+  site under the same domain cannot plant a login of its own. Read only that
+  name; an older name is ignored (and cleared at the next login or logout).
+- Check on every request that the session's account still exists and work
+  out its permissions afresh, so a removed account or a demotion applies at
+  once, not when the session expires.
+- Remove expired sessions when a new one is made, and keep at most a few per
+  account (the oldest goes): otherwise logging in again and again fills the
+  memory.
 - Accept only `Content-Type: application/json` for anything that changes
   something, and only POST. A form on another site can send only
   form-encoded data or plain text, and a script on another site cannot send
@@ -120,7 +130,18 @@ visitor's cookie (cross-site request forgery).
 
 **Test it.** Log in twice, change the password in one, and check the other
 is refused. For every POST route, send a form-encoded and a plain-text body
-with a valid cookie and check each is refused.
+with a valid cookie and check each is refused. Send the session under the
+old name and check it is refused. Remove an account and check its session
+ends on the next request.
+
+**Behind a web server (FastCGI).** FastCGI believes what the web server
+says (the visitor's address, the headers), so keep its port on 127.0.0.1
+and warn at start when it is not. Its records also make it easy to hold
+resources: answer one request at a time and refuse more than a few open
+request IDs on one connection; limit connections; give each record and each
+whole request a time limit (tens of seconds, not minutes). Test with request
+IDs that are never finished, records that stop half way, and a few hundred
+idle connections.
 
 ## 5. Links between your bots
 
@@ -138,6 +159,17 @@ so it needs more than correct cryptography:
 - **Limits on lines** (64 kB), and anything that is not the expected shape
   (not a JSON object, a name that is a list, a nonce of the wrong length)
   answered with an error, never an unhandled exception.
+- **Limits after the login too.** A bot that logged in can still be stolen:
+  cap each message (ghostbot: 1 MB, except the shared tables), and how much
+  a link may send in a minute (ghostbot: 64 MB or 6,000 messages); more ends
+  the link. Send big data (a whole table at link time) in pieces, so the
+  cap can stay low as the data grows.
+- **The name comes from the login, never from a message.** Whatever a
+  message says about who sent it (a "bot" field in a note, a second "this is
+  me" line), use the name the link logged in with; a link keeps its first
+  name until it closes.
+- **No plain links across a network.** Without TLS nothing proves who the
+  other end is; allow plain TCP only to this machine (127.0.0.1, ::1).
 - **Messages are data from outside, even after the login.** Accept only a
   JSON object; refuse `NaN` and `Infinity` (many JSON libraries accept
   them, and a `NaN` timestamp never compares as older); limit how deep it
