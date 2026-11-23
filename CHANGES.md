@@ -1,5 +1,22 @@
 # ghostkit: version history
 
+### 0.1.3 (2026-11-23)
+
+From the security review of ghostbot, ghostgate and ghostkit:
+
+- eggkit-update.tcl, without curl (Tcl's `http` package): `-maxsize` now
+  holds while the data comes in (before, a server could send any amount,
+  all kept in memory, and only then refused); and https checks the
+  server's certificate against the machine's CA certificates, refusing to
+  fetch when none are found (`::eggkit::update::cafile` points elsewhere).
+  Before, the `tls` package was used without checking the certificate.
+  docs/eggkit.md: prefer curl, which also checks the host name.
+- Tests: RFC 8032 test 3 and SHA(abc), signatures with S + L and with an
+  extra byte refused, in Python and in Tcl; the size limit against a 30 MB
+  answer with and without Content-Length; the TLS options.
+- docs/botnet.md says that its link format is ghostkit's example, not
+  ghostbot's wire format.
+
 ### 0.1.2 (2026-11-23)
 
 - **examples/botnet/link**: linked bots, as docs/botnet.md describes, in
