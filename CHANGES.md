@@ -5,8 +5,9 @@
 From the security review of ghostbot, ghostgate and ghostkit:
 
 - eggkit-update.tcl, without curl (Tcl's `http` package): `-maxsize` now
-  holds while the data comes in (before, a server could send any amount,
-  all kept in memory, and only then refused); and https checks the
+  holds while the data comes in, read at most 64 kB at a time on Tcl 8.6
+  and 9 (before, a server could send any amount, all kept in memory, and
+  only then refused); and https checks the
   server's certificate against the machine's CA certificates, refusing to
   fetch when none are found (`::eggkit::update::cafile` points elsewhere).
   Before, the `tls` package was used without checking the certificate.
