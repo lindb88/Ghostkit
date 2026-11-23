@@ -131,7 +131,17 @@ The address must be **https://**. Plain `http://` is refused unless you add
 on the way could see what the bot fetches and hold back new releases.
 Redirects may not leave https either. Downloads use curl when it is
 installed, else Tcl's `http` package (which needs the `tls` package for
-https). They run in the background, so a slow server never freezes the bot.
+https). They run in the background, so a slow server never freezes the bot,
+and `-maxsize` holds while the data comes in: a server sending more is cut
+off, not kept in memory.
+
+**Prefer curl.** With Tcl's `http` and `tls` packages, eggkit has the
+server's certificate checked against the machine's CA certificates
+(`-require 1`), found in the usual places (Debian, Red Hat, OpenBSD,
+FreeBSD, Alpine); set `::eggkit::update::cafile` to point elsewhere. If none
+are found, it fetches nothing over https. Whether the `tls` package also
+checks that the certificate is for the right host name depends on its
+version; curl always does.
 
 `register` options: `-daily 0|1`, `-maxsize <bytes>`, `-allowhttp 0|1`. From your own code:
 `::eggkit::update::check greeter ?callback?`, where the callback gets the

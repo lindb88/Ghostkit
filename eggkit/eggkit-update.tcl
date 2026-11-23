@@ -19,12 +19,13 @@
 # halfway never leaves half a script), and the bot rehashes.
 #
 # Fetching: https only (plain http:// only with -allowhttp 1); curl when installed, else Tcl's http package (which
-# needs the tls package for https). Redirects may not leave https. Fetches run in
-# the background; the bot never freezes waiting for a slow server.
+# needs the tls package for https, and then checks the certificate against this machine's CA certificates; whether
+# it checks the host name too depends on the tls version, so prefer curl). Redirects may not leave https. The size
+# limit holds while the data comes in. Fetches run in the background; the bot never freezes waiting for a slow server.
 # Part of ghostkit (MIT license).
 
 namespace eval ::eggkit::update {
-  variable version 0.1.0
+  variable version 0.1.3
   variable scripts                   ;# name -> dict: file url key daily maxsize
   variable busy                      ;# name -> 1 while a check runs
   array set scripts {}
@@ -176,12 +177,38 @@ namespace eval ::eggkit::update {
     }
     if {[string match https://* $url]} {
       if {[catch {package require tls}]} { return [after 0 [list {*}$cmd 0 "https needs curl or the tls package"]] }
-      ::http::register https 443 [list ::tls::socket -autoservername 1]
+      # 0.1.3: the server's certificate is checked against this machine's CA certificates (-require 1); without
+      # them, nothing is fetched. Whether the tls package also checks the host name depends on its version:
+      # curl does both, so prefer curl.
+      set ca [ca_option]
+      if {$ca eq ""} {
+        return [after 0 [list {*}$cmd 0 "no CA certificates found for the tls package (set ::eggkit::update::cafile, or install curl)"]]
+      }
+      ::http::register https 443 [list ::tls::socket -autoservername 1 -require 1 {*}$ca]
     }
-    if {[catch {::http::geturl $url -binary 1 -timeout 60000 \
+    # 0.1.3: the size limit while the data comes in (-progress), not after all of it is in memory
+    if {[catch {::http::geturl $url -binary 1 -timeout 60000 -blocksize 65536 \
+                  -progress [list [namespace current]::http_progress $maxsize] \
                   -command [list [namespace current]::http_done $maxsize $cmd]} e]} {
       after 0 [list {*}$cmd 0 $e]
     }
+  }
+
+  # where the CA certificates are: ::eggkit::update::cafile if set, else the usual places
+  variable cafile ""
+  variable cafiles {/etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem
+                    /etc/ssl/ca-bundle.pem /usr/local/share/certs/ca-root-nss.crt /usr/local/etc/ssl/cert.pem}
+  proc ca_option {} {
+    variable cafile; variable cafiles
+    foreach f [concat [list $cafile] $cafiles] {
+      if {$f ne "" && [file readable $f]} { return [list -cafile $f] }
+    }
+    return ""
+  }
+
+  # stop the transfer as soon as it, or the length the server states, passes the limit
+  proc http_progress {maxsize tok total current} {
+    if {$current > $maxsize || $total > $maxsize} { ::http::reset $tok toolarge }
   }
 
   proc pipe_read {ch buf maxsize cmd} {
@@ -205,6 +232,7 @@ namespace eval ::eggkit::update {
   proc http_done {maxsize cmd tok} {
     set status [::http::status $tok]; set code [::http::ncode $tok]; set body [::http::data $tok]
     ::http::cleanup $tok
+    if {$status eq "toolarge"} { return [{*}$cmd 0 "it is larger than allowed"] }
     if {$status ne "ok" || $code != 200} { return [{*}$cmd 0 "$status (HTTP $code)"] }
     if {[string length $body] > $maxsize} { return [{*}$cmd 0 "it is larger than allowed"] }
     {*}$cmd 1 $body
