@@ -19,7 +19,9 @@ One step per line; a line starting with # is a comment (a # later on is a channe
   server <mode>                         plain (default), libera or quakenet; first, if at all
   account <name> <password>             a services account (libera, quakenet)
   chanlev <#chan> <account> <flags>     services access in a channel (ChanServ / Q op and invite)
-  bot <command> [args]                  start a bot; {port} and {host} are the server's; its output is
+  bot <command> [args]                  start a bot; {port} and {host} are the server's, {tmp} a folder
+                                        for this run (removed after), {port:NAME} a free port, the same
+                                        for every NAME in the run (a botnet's link port); its output is
                                         kept and shown when a step fails. It runs in the scenario's
                                         folder; words are taken as the scenario reads them (quotes group,
                                         no pipes or &&: for more, start a script). Several bot lines
@@ -92,6 +94,8 @@ class Runner:
         self.server = None
         self.users = {}
         self.bots = []                                 # each: {'n', 'cmd', 'proc', 'log', 'stopped'}
+        self.tmp = None                                # {tmp}: made when first used
+        self.ports = {}                                # {port:NAME}
 
     async def run(self):
         mode = 'plain'
@@ -125,6 +129,25 @@ class Runner:
         self.out('%d of %d passed%s' % (passed, len(self.steps), ', %d not run' % skipped if skipped else ''))
         return failed == 0
 
+    def fill(self, word):
+        """The placeholders in a bot line's word."""
+        import re
+        import socket
+
+        def free(m):
+            name = m.group(1)
+            if name not in self.ports:
+                with socket.socket() as so:
+                    so.bind(('127.0.0.1', 0))
+                    self.ports[name] = so.getsockname()[1]
+            return str(self.ports[name])
+        word = word.replace('{port}', str(self.server.port)).replace('{host}', '127.0.0.1')
+        if '{tmp}' in word:
+            if self.tmp is None:
+                self.tmp = tempfile.mkdtemp(prefix='irclab-')
+            word = word.replace('{tmp}', self.tmp)
+        return re.sub(r'\{port:(\w+)\}', free, word)
+
     def bot_tail(self, b, n=15):
         if b is None:
             return ['(no bot started)']
@@ -144,7 +167,7 @@ class Runner:
         elif word == 'chanlev':
             s.set_chanlev(toks[1], toks[2], toks[3])
         elif word == 'bot':
-            cmd = ' '.join(shlex.quote(t.replace('{port}', str(s.port)).replace('{host}', '127.0.0.1')) for t in toks[1:])
+            cmd = ' '.join(shlex.quote(self.fill(t)) for t in toks[1:])
             log = tempfile.NamedTemporaryFile('w', prefix='irclab-bot-', suffix='.log', delete=False)
             env = dict(os.environ, **(self.env or {}))
             proc = subprocess.Popen(cmd, shell=True, cwd=self.base, env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -303,6 +326,9 @@ class Runner:
                     pass
         if self.server:
             await self.server.stop()
+        if self.tmp:
+            import shutil
+            shutil.rmtree(self.tmp, ignore_errors=True)
 
 
 def run_file(path, verbose=False):

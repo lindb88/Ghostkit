@@ -22,6 +22,19 @@
   **docs/quakenet.md** (connecting, the 5-per-address limit, Q accounts,
   CHALLENGEAUTH with a worked example, the hidden host, CHANLEV, eggdrops).
   Both have fixed examples to check an implementation against.
+- **examples/botnet/link**: linked bots, as docs/botnet.md describes, in
+  standard-library Python. `botlink.py`: a hub and leaves over TLS with a
+  pinned certificate, the shared-secret login (checked against the guide's
+  example values), heartbeats, reconnecting with growing waits, shared data
+  (newest change wins, deletions remembered, ties settled the same way,
+  timestamps far ahead refused), and the port's limits (waiting logins,
+  line sizes, a second before a no, the replacement trap). `linkbot.py`: an
+  IRC bot that works alone, and with `--role hub|leaf` links with copies of
+  itself: one bot answers per channel, notes are shared, a leaf that loses
+  the hub falls back to teambot's rule. Tested with irclab and against the
+  attacks in docs/security.md.
+- irclab: `{tmp}` (a folder for the run, removed after) and `{port:NAME}` (a
+  free port, the same wherever NAME is used) in `bot` lines.
 - examples/botnet/teambot.py: the simplest botnet, two bots where one
   answers and the other takes over when it goes, tested with irclab.
 - irctools: `stop()` closes the connection itself when the server does not

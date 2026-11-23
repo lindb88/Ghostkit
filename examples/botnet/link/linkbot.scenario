@@ -1,0 +1,40 @@
+# Two linked bots: python3 -m irclab run examples/botnet/link/linkbot.scenario
+# The hub makes its certificate in {tmp}/hub; the leaf, on the same machine, pins it from the file.
+bot python3 linkbot.py --port {port} --name Hub --role hub --link-port {port:link} --cert-dir {tmp}/hub --secret-file example.secret --fast
+bot python3 linkbot.py --port {port} --name Leaf1 --role leaf --link-port {port:link} --hub-cert {tmp}/hub/link.crt --secret-file example.secret --team Hub,Leaf1 --retry-max 2 --fast
+wait Hub in #test
+wait Leaf1 in #test
+
+user Alice
+Alice join #test
+# the leaf links within a few seconds (it may start before the hub has made its certificate)
+sleep 4
+Alice say #test !bots
+expect Alice from Hub in #test "Linked to Hub: Hub, Leaf1" within 20
+# one bot answers: the hub names itself the main bot here
+Alice say #test !hello
+expect Alice from Hub in #test "Hello, Alice! (from Hub)"
+refute Alice from Leaf1 in #test for 2
+
+# a note made on one bot is known to the other
+Alice say #test "!remember tea Earl Grey, hot"
+expect Alice from Hub in #test "Remembered tea."
+sleep 1
+
+# the hub's machine goes down: the leaf answers by itself, and knows the note
+stopbot 1
+wait Hub out #test
+Alice say #test "!recall tea"
+expect Alice from Leaf1 in #test "tea: Earl Grey, hot"
+Alice say #test !bots
+expect Alice from Leaf1 in #test "I cannot reach the hub right now."
+
+# the hub comes back with nothing in memory: the leaf links again and the hub learns the note from it
+bot python3 linkbot.py --port {port} --name Hub --role hub --link-port {port:link} --cert-dir {tmp}/hub --secret-file example.secret --fast
+wait Hub in #test
+sleep 4
+Alice say #test !bots
+expect Alice from Hub in #test "Linked to Hub: Hub, Leaf1" within 20
+Alice say #test "!recall tea"
+expect Alice from Hub in #test "tea: Earl Grey, hot"
+refute Alice from Leaf1 in #test for 2

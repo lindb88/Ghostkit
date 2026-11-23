@@ -137,6 +137,28 @@ Any language can do this with what it has built in:
   not clear the leaf's *new* connection, or the leaf looks linked but gets
   nothing. Clean up only if the closing link is still the current one.
 
+### A worked example
+
+`examples/botnet/link/` is all of this in Python, standard library only:
+`botlink.py` (the hub, the leaf, the login, heartbeats, reconnecting, shared
+data, the port's limits; about 500 lines, written to be ported) and
+`linkbot.py`, an IRC bot that works alone and links when given a role:
+
+```
+python3 linkbot.py --name Solo --port 6667                       # alone
+python3 linkbot.py --name Hub --role hub --link-port 7000 --cert-dir hubcert --secret-file my.secret
+python3 linkbot.py --name Leaf1 --role leaf --link-port 7000 --hub-cert hubcert/link.crt \
+    --secret-file my.secret --team Hub,Leaf1
+```
+
+Linked, the hub names one bot to answer in each channel, notes made with
+`!remember` reach every bot, a leaf that loses the hub answers by the rule
+of step 1, and a hub that comes back empty learns the notes from its
+leaves. `linkbot.scenario` tests all of that with irclab;
+`tests/test_botlink.py` tests the protocol against the example values above
+and the port against the attacks below. A bot in another language can link
+to `linkbot.py`'s hub if it speaks the same lines.
+
 Test the port itself, not only the client: [security.md](security.md),
 point 5, lists the cases (wrong and replayed logins, nonsense, huge lines,
 many idle connections, a link replaced).

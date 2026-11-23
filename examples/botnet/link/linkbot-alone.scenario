@@ -1,0 +1,13 @@
+# linkbot without a role: an ordinary bot.  python3 -m irclab run examples/botnet/link/linkbot-alone.scenario
+bot python3 linkbot.py --port {port} --name Solo --fast
+wait Solo in #test
+user Alice
+Alice join #test
+Alice say #test !hello
+expect Alice from Solo in #test "Hello, Alice! (from Solo)"
+Alice say #test "!remember tea Earl Grey, hot"
+expect Alice from Solo in #test "Remembered tea."
+Alice say #test "!recall tea"
+expect Alice from Solo in #test "tea: Earl Grey, hot"
+Alice say #test !bots
+expect Alice from Solo in #test "I am on my own."

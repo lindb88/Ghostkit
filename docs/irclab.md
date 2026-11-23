@@ -64,7 +64,7 @@ Quotes group words: `"two words"` or `'say "hi"'`.
 | `server plain\|libera\|quakenet` | the network's kind (first line, if at all; `plain` when left out) |
 | `account <name> <password>` | a services account (libera, quakenet) |
 | `chanlev <#chan> <account> <flags>` | services access in a channel: ChanServ or Q gives op (`o`) and invite |
-| `bot <command> [args]` | start your bot; `{port}` and `{host}` are the server's. Several `bot` lines start several bots (a botnet), numbered 1, 2, ... |
+| `bot <command> [args]` | start your bot; `{port}` and `{host}` are the server's, `{tmp}` a folder for this run (removed afterwards), `{port:NAME}` a free port that is the same wherever `NAME` is used (a hub's link port). Several `bot` lines start several bots (a botnet), numbered 1, 2, ... |
 | `stopbot <n>` | stop bot n at once, as if its machine went down |
 | `user <nick> [ident]` | a user connects; their host is `<ident>.host` (`alice.host`) |
 | `<nick> join <#chan> [key]` | |

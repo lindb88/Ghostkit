@@ -13,6 +13,7 @@ Python 3.8+ and Tcl 8.6/9, with nothing to install. MIT license.
 | **irctools** | the pieces of a Python IRC bot: parsing, case rules, masks, flood-safe sending, safe fetching of posted links, and a `Bot` that does the housekeeping | [docs/irctools.md](docs/irctools.md) |
 | **eggkit** | for eggdrop scripts: safe helpers, Ed25519 signature checks in plain Tcl, and signed self-updates | [docs/eggkit.md](docs/eggkit.md) |
 | **webstatus** | a status page for any bot: the bot writes a small `status.json`, one HTML file shows it | [docs/webstatus.md](docs/webstatus.md) |
+| **botlink** | link your own bots into a botnet (a hub and leaves, TLS with a pinned certificate, a shared-secret login, shared data), with a bot that works alone or linked | [examples/botnet/link](examples/botnet/link/botlink.py), [docs/botnet.md](docs/botnet.md) |
 | **guides** | security for bot authors, building a botnet, and bots on QuakeNet, for any language | [docs/security.md](docs/security.md), [docs/botnet.md](docs/botnet.md), [docs/quakenet.md](docs/quakenet.md) |
 | **ghostbot plugins** | writing plugins for ghostbot, with an example | [docs/ghostbot-plugins.md](docs/ghostbot-plugins.md) |
 
@@ -106,6 +107,7 @@ eggkit/        eggkit-util.tcl, eggkit-ed25519.tcl, eggkit-update.tcl, sign.py
 webstatus/     the status page (index.html), its format check, a small server   (python3 -m webstatus)
 examples/      echobot.py + echobot.scenario (Python), node/ and go/ bots with their scenarios,
                botnet/teambot.py (the simplest botnet: two bots, one answers, the other takes over),
+               botnet/link/ (linked bots: a hub and leaves over TLS, shared data; optional, alone by default),
                eggdrop/greeter.tcl, ghostbot/quotes.py + its test
 tests/         python3 tests/run.py
 tools/         bundle_irclab.py: irclab as one file to ship inside a project
