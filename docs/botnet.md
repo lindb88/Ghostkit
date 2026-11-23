@@ -81,6 +81,10 @@ Any language can do this with what it has built in:
   (`openssl x509 -in hub.crt -outform DER | sha256sum`), not from the first
   connection, or whoever sits in the middle at that moment gets pinned
   (see [security.md](security.md), point 6).
+- *The format below is ghostkit's own, used by `examples/botnet/link/`.
+  ghostbot's link works the same way but its messages differ (the hub
+  speaks first, the MAC is over `kind|nonce|name`), so the two do not link
+  to each other.*
 - **One JSON object per line**, each with a type field: easy to read and
   write in every language, and easy to log while debugging.
 
