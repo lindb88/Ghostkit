@@ -17,6 +17,6 @@ from .message import Message, build, clean, parse, split_text
 from .sendq import SendQueue
 from . import safefetch
 
-__version__ = '0.1.1'
+__version__ = '0.1.2'
 __all__ = ['Bot', 'Context', 'Message', 'parse', 'build', 'clean', 'split_text', 'lower', 'equal', 'CaseDict',
            'match', 'ban_mask', 'is_channel', 'SendQueue', 'q_password_hash', 'q_response', 'safefetch', '__version__']
