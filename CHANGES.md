@@ -16,6 +16,15 @@ From the security review of ghostbot, ghostgate and ghostkit:
   answer with and without Content-Length; the TLS options.
 - docs/botnet.md says that its link format is ghostkit's example, not
   ghostbot's wire format.
+- From the follow-up review (ghostbot 2.37, 2.38, ghostgate 0.36.2, 0.36.3):
+  docs/security.md now covers limits for logged-in bots (a cap per message,
+  a rate per minute, big data in pieces), taking a bot's name only from its
+  login, plain links only on this machine, FastCGI behind a web server
+  (open requests, connections, time limits), and web sessions (the
+  `__Host-` cookie prefix, the account checked on every request, pruning
+  and a cap per account); docs/botnet.md: send whole tables in pieces.
+- examples/botnet/link: botlink.py cuts off a link that sends more than
+  16 MB or 3,000 messages a minute, with a test.
 
 ### 0.1.2 (2026-11-23)
 
