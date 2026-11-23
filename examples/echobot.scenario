@@ -22,3 +22,7 @@ refute Alice from EchoBot in #test for 1
 
 Alice say #test !ops
 expect Alice from EchoBot notice "Ops in #test"
+
+# !title never fetches from this machine (or any private address)
+Alice say #test "!title http://127.0.0.1:6667/"
+expect Alice from EchoBot notice "No title: "

@@ -38,6 +38,20 @@
   `-allowhttp 1`, and redirects may not leave https.
 - webstatus: the status file's permissions can be set (`mode=`, default
   0644 so a web server can read it), with advice for shared folders.
+- irctools: **safefetch**, for fetching addresses people post (`!title`):
+  http and https only, never this machine or a private network; the name is
+  looked up once and the connection goes to exactly the address checked, on
+  every redirect too (no DNS rebinding); no redirects from https to http, no
+  environment proxies, size and time limits; `page_title()` gives one clean
+  line for IRC. The echo bot has `!title`.
+- **docs/security.md**: security for bot authors, in any language, each
+  point with how to test it: text that never becomes code or a second line,
+  addresses people post (SSRF, DNS rebinding, redirects), login limits behind
+  a proxy (X-Forwarded-For), hardening a botnet's link port (and the
+  replacement trap), pinning certificates without blind first trust,
+  updates, flooding.
+- docs/botnet.md: the link port checklist, the replacement trap, and taking
+  the hub's fingerprint from its own machine.
 - **webstatus**: a status page for a bot in any language. The bot writes
   `status.json`; one self-contained HTML file shows its bots, connection
   times, channels and user counts, warns when the file is old, and refreshes

@@ -1,4 +1,4 @@
-"""A small bot on irctools: !echo, !hello, !ops, and a welcome on join.
+"""A small bot on irctools: !echo, !hello, !ops, !title, and a welcome on join.
 
     python3 examples/echobot.py --server irc.libera.chat --port 6697 --tls --channel '#mytest'
     Q_PASSWORD=... python3 examples/echobot.py --server irc.quakenet.org --q-account MyAccount --channel '#mytest'
@@ -6,12 +6,13 @@
 """
 
 import argparse
+import asyncio
 import logging
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from irctools import Bot  # noqa: E402
+from irctools import Bot, safefetch  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--server', default='127.0.0.1')
@@ -55,6 +56,21 @@ async def ops(ctx):
     ch = bot.channels.get(ctx.where)
     names = sorted(n for n, p in ch.users.items() if '@' in p)
     ctx.tell('Ops in %s: %s' % (ctx.where, ', '.join(names) or 'none'))
+
+
+@bot.command('!title')
+async def title(ctx):
+    """The title of a page someone posts: safefetch never fetches from this machine or a private network."""
+    url = ctx.args.split()[0] if ctx.args else ''
+    if not url.startswith(('http://', 'https://')):
+        ctx.tell('Use: !title <http or https address>')
+        return
+    try:
+        text = await asyncio.get_event_loop().run_in_executor(None, safefetch.page_title, url)
+    except safefetch.FetchError as e:
+        ctx.tell('No title: %s' % e)
+        return
+    ctx.reply('Title: %s' % text)
 
 
 @bot.on('JOIN')

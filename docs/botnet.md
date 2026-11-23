@@ -77,6 +77,10 @@ Any language can do this with what it has built in:
   fingerprint** (a SHA-256 of the certificate, copied into each leaf's
   config when it is set up). A self-made certificate is fine: the pinned
   fingerprint is what proves it is your hub, not a certificate authority.
+  Take the fingerprint from the hub's own machine
+  (`openssl x509 -in hub.crt -outform DER | sha256sum`), not from the first
+  connection, or whoever sits in the middle at that moment gets pinned
+  (see [security.md](security.md), point 5).
 - **One JSON object per line**, each with a type field: easy to read and
   write in every language, and easy to log while debugging.
 
@@ -115,6 +119,21 @@ Any language can do this with what it has built in:
 - **Limit what a link can do.** A leaf obeys orders only from the hub, never
   from another leaf; the hub checks that a leaf only reports about itself.
   Then one stolen leaf cannot command the others.
+- **Harden the hub's port**, which is open to the internet:
+  - the same answer for a wrong name and a wrong secret, a second later;
+  - only a few logins waiting at once from one address (and in all), each
+    with a time limit;
+  - a nonce of a sensible length (16 to 128 characters) from the client;
+  - lines no longer than 64 kB, and anything that is not a JSON object of
+    the expected shape answered with an error, never a crash.
+- **Mind the replacement trap.** When a leaf reconnects, its new link
+  replaces the old one, which is then closed; the old link's cleanup must
+  not clear the leaf's *new* connection, or the leaf looks linked but gets
+  nothing. Clean up only if the closing link is still the current one.
+
+Test the port itself, not only the client: [security.md](security.md),
+point 4, lists the cases (wrong and replayed logins, nonsense, huge lines,
+many idle connections, a link replaced).
 
 ## Who answers in a channel
 

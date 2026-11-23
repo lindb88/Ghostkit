@@ -10,10 +10,10 @@ Python 3.8+ and Tcl 8.6/9, with nothing to install. MIT license.
 | | | |
 |---|---|---|
 | **irclab** | a test IRC server and scripted users; test a bot in any language with a plain text scenario | [docs/irclab.md](docs/irclab.md) |
-| **irctools** | the pieces of a Python IRC bot: parsing, case rules, masks, flood-safe sending, and a `Bot` that does the housekeeping | [docs/irctools.md](docs/irctools.md) |
+| **irctools** | the pieces of a Python IRC bot: parsing, case rules, masks, flood-safe sending, safe fetching of posted links, and a `Bot` that does the housekeeping | [docs/irctools.md](docs/irctools.md) |
 | **eggkit** | for eggdrop scripts: safe helpers, Ed25519 signature checks in plain Tcl, and signed self-updates | [docs/eggkit.md](docs/eggkit.md) |
 | **webstatus** | a status page for any bot: the bot writes a small `status.json`, one HTML file shows it | [docs/webstatus.md](docs/webstatus.md) |
-| **guides** | building a botnet, and bots on QuakeNet, for any language | [docs/botnet.md](docs/botnet.md), [docs/quakenet.md](docs/quakenet.md) |
+| **guides** | security for bot authors, building a botnet, and bots on QuakeNet, for any language | [docs/security.md](docs/security.md), [docs/botnet.md](docs/botnet.md), [docs/quakenet.md](docs/quakenet.md) |
 | **ghostbot plugins** | writing plugins for ghostbot, with an example | [docs/ghostbot-plugins.md](docs/ghostbot-plugins.md) |
 
 ## Five minutes

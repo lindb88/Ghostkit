@@ -130,6 +130,23 @@ q.put('PRIVMSG #chan :hi')
 q.put('PONG :x', urgent=True)                 # before the rest
 ```
 
+## Fetching addresses people post
+
+```python
+from irctools import safefetch
+
+title = safefetch.page_title(url)        # one clean line for IRC, or raises safefetch.FetchError
+page = safefetch.fetch(url, max_bytes=500_000, timeout=10)
+```
+
+Only http and https, and never this machine or a private network: the name
+is looked up once and the connection goes to exactly the address checked,
+on every redirect too (no DNS rebinding); no redirects from https to http;
+no proxies from the environment; size and time limits. It blocks, so in a
+bot: `await loop.run_in_executor(None, safefetch.page_title, url)`. The echo
+bot's `!title` uses it. Why all of this matters:
+[security.md](security.md), point 2.
+
 ## Testing
 
 A bot built on irctools tests well with irclab. See
