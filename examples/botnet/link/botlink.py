@@ -43,6 +43,7 @@ MAX_DEPTH = 100              # nesting in a message; far deeper than anything re
 LOGIN_TIMEOUT = 15           # seconds to finish the login
 PENDING_PER_IP, PENDING_MAX = 4, 64     # logins waiting at once, per address and in all
 PING_EVERY, DEAD_AFTER = 30, 90         # heartbeats: a TCP connection can look open long after the other side died
+RATE_BYTES, RATE_MSGS = 16 << 20, 3000  # per link and minute, after the login; more ends the link (a stolen bot)
 FUTURE_SLACK = 600           # shared data: seconds a timestamp may be ahead of our clock
 TOMBSTONE_DAYS = 90          # deletions are remembered this long, or an offline bot brings them back
 NAME_RX = re.compile(r'[A-Za-z0-9_\-\[\]\\`^{}|]{1,32}$')     # an IRC-nick-like bot name
@@ -239,11 +240,17 @@ async def _read_messages(link, handle, line_max):
     """Messages until the link ends. One that cannot be decoded ends the link; one handle() cannot use (a wrong
     type where a name or number belongs) is logged and skipped. Many of those in a row end it too."""
     bad = []
+    window, n_bytes, n_msgs = time.time(), 0, 0
     while not link.closed:
         line = await read_line(link.reader, line_max)
         if not line:
             return
-        link.heard = time.time()
+        link.heard = now = time.time()
+        if now - window > 60:
+            window, n_bytes, n_msgs = now, 0, 0
+        n_bytes, n_msgs = n_bytes + len(line), n_msgs + 1
+        if n_bytes > RATE_BYTES or n_msgs > RATE_MSGS:
+            raise ValueError('more than %d MB or %d messages in a minute' % (RATE_BYTES >> 20, RATE_MSGS))
         m = decode(line)
         if m.get('t') == 'ping':
             link.send({'t': 'pong'})

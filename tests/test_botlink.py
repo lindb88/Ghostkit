@@ -281,6 +281,26 @@ class LinkPort(unittest.TestCase):
             tb.cancel()
         self.run_hub(t)
 
+    def test_too_much_ends_a_link(self):
+        """A logged-in bot that sends more than RATE_MSGS messages in a minute is cut off (a stolen bot)."""
+        async def t(hub, port, seen):
+            old = bl.RATE_MSGS
+            bl.RATE_MSGS = 50
+            try:
+                r, w = await self.raw(port)
+                w.write(bl.encode({'t': 'hello', 'name': 'Noisy', 'nonce': 'n' * 32, 'role': 'leaf'}))
+                ch = await self.answer(r)
+                w.write(bl.encode({'t': 'auth', 'mac': bl.link_mac(SECRET, 'leaf', ch['nonce'], 'Noisy')}))
+                await self.until(lambda: 'Noisy' in hub.leaves)
+                for i in range(80):
+                    w.write(bl.encode({'t': 'status', 'n': i}))
+                await self.until(lambda: 'Noisy' not in hub.leaves, 5)
+                self.assertLessEqual(len([m for n, m in seen if m.get('t') == 'status']), 50)
+                w.close()
+            finally:
+                bl.RATE_MSGS = old
+        self.run_hub(t)
+
     def test_silence_ends_a_link(self):
         async def t(hub, port, seen):
             old = bl.PING_EVERY, bl.DEAD_AFTER
