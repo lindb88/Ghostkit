@@ -1,0 +1,21 @@
+# ghostkit's tests on every push and pull request (review I5), with Tcl for eggkit.
+name: tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-22.04          # still has Python 3.8 builds
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python: ['3.8', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Tcl, curl and openssl
+        run: sudo apt-get update -q && sudo apt-get install -y -q tcl curl openssl
+      - name: tests
+        run: python3 tests/run.py -v
