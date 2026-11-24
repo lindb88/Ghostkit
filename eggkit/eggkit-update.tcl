@@ -25,7 +25,7 @@
 # Part of ghostkit (MIT license).
 
 namespace eval ::eggkit::update {
-  variable version 0.1.3
+  variable version 0.1.4
   variable scripts                   ;# name -> dict: file url key daily maxsize
   variable busy                      ;# name -> 1 while a check runs
   array set scripts {}
@@ -37,6 +37,9 @@ namespace eval ::eggkit::update {
   proc register {name file url pubhex args} {
     variable scripts
     if {![regexp {^[0-9a-fA-F]{64}$} $pubhex]} { error "eggkit::update: $name: the key must be 64 hex characters" }
+    if {[::eggkit::ed25519::weak_key [binary decode hex $pubhex]]} {
+      error "eggkit::update: $name: that is not a usable public key (not a point, or of small order)"
+    }
     set o [dict merge {-daily 0 -maxsize 2000000 -allowhttp 0} $args]
     set http [string is true -strict [dict get $o -allowhttp]]
     if {[string match -nocase http://* $url] && !$http} {
@@ -94,7 +97,9 @@ namespace eval ::eggkit::update {
   proc got_sig {name done data ok sig} {
     variable scripts
     if {!$ok} { return [finish $name $done failed "could not fetch the signature: $sig"] }
-    set why [install $name $data [string trim $sig]]
+    # 0.1.4: any error while installing is reported, and the check ends: before, it escaped this callback, the
+    # script stayed "busy", and every later check of it did nothing until a restart, silently
+    if {[catch {install $name $data [string trim $sig]} why]} { set why "failed: $why" }
     if {[string match "updated *" $why]} {
       finish $name $done updated $why
       if {[info commands ::rehash] ne ""} { utimer 1 ::rehash }
@@ -112,30 +117,49 @@ namespace eval ::eggkit::update {
     if {$done ne ""} { {*}$done $name $result $msg }
   }
 
+  # 0.1.4: the file a path leads to, through symlinks (a script kept elsewhere and linked into the scripts folder
+  # is updated where it is, instead of the link being replaced by a copy)
+  proc target_of {path} {
+    for {set n 0} {$n < 20} {incr n} {
+      if {[catch {file type $path} type] || $type ne "link"} { return $path }
+      set path [file join [file dirname $path] [file readlink $path]]
+    }
+    error "too many symlinks at $path"
+  }
+
   # every check, then the replacement; "updated <version>", "current <version>", or why not
   proc install {name data sighex} {
     variable scripts
     set s $scripts($name)
-    set file [dict get $s file]
+    set file [target_of [dict get $s file]]
     set size [string length $data]
     if {$size < 1 || $size > [dict get $s maxsize]} { return "refused: an unlikely size ($size bytes)" }
     if {![regexp {^[0-9a-fA-F]{128}$} $sighex]} { return "refused: no valid signature came with it" }
+    # 0.1.4: a temporary file of its own, made new (EXCL: never through a file or link already there) and private;
+    # removed on every way out
+    set tmp [file join [file dirname $file] ".[file tail $file].eggkit-[pid]-[clock clicks]"]
+    if {[catch {install_from $name $s $file $tmp $data $sighex} result]} {
+      catch {file delete -force $tmp}
+      return -code error $result
+    }
+    catch {file delete -force $tmp}
+    return $result
+  }
+
+  proc install_from {name s file tmp data sighex} {
+    set f [open $tmp {WRONLY CREAT EXCL BINARY} 0600]
+    if {[catch {puts -nonewline $f $data; close $f} e]} { catch {close $f}; error $e }
     # the signature first: nothing about an unsigned file is looked at further
-    set tmp $file.eggkit-new
-    set f [open $tmp wb]; puts -nonewline $f $data; close $f
     set via [::eggkit::ed25519::verify_file [dict get $s key] $tmp $sighex]
     if {$via eq ""} {
-      file delete -force $tmp
       return "refused: the signature does not match your key"
     }
     set text [encoding convertfrom utf-8 $data]
     if {[file_name $text] ne $name} {
-      file delete -force $tmp
       return "refused: the signed file is not $name (its eggkit-name line says \"[file_name $text]\")"
     }
     set new [file_version $text]
     if {$new eq ""} {
-      file delete -force $tmp
       return "refused: the new file has no eggkit-version line"
     }
     set old ""
@@ -143,10 +167,15 @@ namespace eval ::eggkit::update {
       set f [open $file r]; fconfigure $f -encoding utf-8; set old [file_version [read $f]]; close $f
     }
     if {![newer $new $old]} {
-      file delete -force $tmp
       return "current $old (the published file is $new)"
     }
-    if {[file exists $file]} { file copy -force $file $file.previous }
+    if {[file exists $file]} {
+      file copy -force $file $file.previous
+      # 0.1.4: the new file keeps the old one's permissions (before: the umask's, so a 0600 script became 0644)
+      catch {file attributes $tmp -permissions [file attributes $file -permissions]}
+    } else {
+      catch {file attributes $tmp -permissions 0644}
+    }
     file rename -force $tmp $file
     return "updated $old -> $new (signature checked by $via); rehashing"
   }
