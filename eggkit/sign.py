@@ -113,6 +113,8 @@ def verify(public, msg, sig):
     s = int.from_bytes(sig[32:], 'little')
     if A is None or R is None or s >= Q:
         return False
+    if _eq(_mul(8, A), (0, 1, 1, 0)):              # 0.1.4: a key of small order, which no real key is
+        return False
     return _eq(_mul(s, G), _add(R, _mul(_h(sig[:32] + public + msg), A)))
 
 

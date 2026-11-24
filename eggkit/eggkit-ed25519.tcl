@@ -152,6 +152,17 @@ namespace eval ::eggkit::ed25519 {
     return [string reverse [binary decode hex [format %064llx $n]]]
   }
 
+  # 0.1.4: 1 when the 32-byte key is no use as a public key: not a point, or one of the eight of small order (with
+  # those, a trivial signature passes for any file; a real key is never one)
+  proc weak_key {pub} {
+    if {[string length $pub] != 32} { return 1 }
+    set A [pdecode $pub]
+    if {$A eq ""} { return 1 }
+    lassign [pmul 8 $A] x y z
+    variable p
+    return [expr {$x % $p == 0 && ($y - $z) % $p == 0}]
+  }
+
   # 1 when sig (64 bytes) was made by the owner of public key pub (32 bytes) over msg (bytes)
   proc verify {pub msg sig} {
     variable L; variable p; variable B
@@ -197,5 +208,5 @@ namespace eval ::eggkit::ed25519 {
     return ""
   }
 
-  namespace export verify verify_hex verify_file sha512
+  namespace export verify verify_hex verify_file sha512 weak_key
 }
