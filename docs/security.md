@@ -182,6 +182,22 @@ so it needs more than correct cryptography:
 - **Roles are not claimed.** If some links may do more (a gateway passing
   on other bots' commands), the hub decides which names have that role; a
   link saying "I am the gateway" is not enough.
+- **Shared data is power.** If bots share tables (access lists, password
+  hashes), a write to such a table is as strong as the command that would
+  have made it, so a stolen bot can grant itself anything the tables
+  grant. Check entries for the shapes your own commands make (a channel's
+  entry is never more than the channel's owner), and let only bots you
+  name change what gives access to everything (admins, the owners'
+  passwords). ghostbot 2.45 does both (`[link] rpc_from`).
+- **Names are names.** Take only the characters a name can have (an IRC
+  nick's), and refuse one that is another bot's written differently; a
+  name with a newline writes fake lines in your log, and an invisible
+  character makes a look-alike.
+- **Size first, then parse.** Read at most a short line (a few MB) and look
+  at its size before parsing it: a 15 MB line of small JSON arrays takes
+  about 50 times that in memory while it is parsed.
+- **Raise only the events you expect.** If links can raise events on the
+  other side, keep a list of the ones a link really sends.
 - **The replacement trap.** When a bot reconnects, the new connection
   replaces the old one, and the old one is closed. Its cleanup code then
   runs, and if it simply clears "this bot's connection", it clears the
@@ -213,7 +229,11 @@ gets pinned instead.
 - If you do pin on first use, tell the owner which fingerprint was pinned,
   so it can still be checked, and offer a setting that never pins
   automatically.
-- On a mismatch, refuse to link and say so; never repin by yourself.
+- On a mismatch, refuse to link and tell the owner (once per certificate,
+  not every retry); never repin by yourself.
+- When you write the pin into a config file, change that one line: a
+  config parser that writes the whole file back drops the owner's
+  comments. And see "Secrets on disk" below.
 
 ## 7. Updates
 
@@ -229,6 +249,22 @@ whatever the server hands it, so a hacked web server owns every bot.
   protects the contents, https keeps others from seeing or holding back
   what the bot fetches.
 - Never accept code or shell commands over a bot link.
+- Install carefully: write the download to a temporary file of its own,
+  made new (`O_EXCL`, Tcl `{WRONLY CREAT EXCL}`) so it never goes through a
+  link someone left there; give the new file the old one's permissions;
+  update a symlinked script where it points; and on any failure (a full
+  disk), remove the temporary file and say so, so the next check still
+  runs.
+- Refuse a public key of small order when it is configured: with one, a
+  trivial signature passes for every file.
+
+### Secrets on disk
+
+A config file with secrets is written whole through a temporary file and a
+rename. Make that temporary file private from the start (`mkstemp`, or
+`os.open(..., O_CREAT | O_EXCL, 0o600)`), not with the umask and a chmod
+afterwards: in between, another user on the machine (a shell host) can open
+it, and an open file stays readable after the chmod.
 
 **Test it.** Serve a release signed with another key, an older signed
 release, and a different program's signed release; each must be refused,

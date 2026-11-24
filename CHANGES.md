@@ -1,5 +1,25 @@
 # ghostkit: version history
 
+### 0.1.4 (2026-11-24)
+
+From security review 4 of ghostbot, ghostgate and ghostkit:
+
+- eggkit-update.tcl: a failure while installing (a full disk, a missing
+  folder) is logged and reported as `failed`, and the next check runs;
+  before, it escaped as a background error, the script stayed "busy" and
+  every later check did nothing until a restart. The download goes to a
+  temporary file of its own, made new and private (before: a fixed name,
+  through any link left there, before the signature was checked); the new
+  file keeps the old one's permissions (a 0600 script became 0644); and a
+  script that is a symlink is updated where it points, `.previous` beside
+  it (before, the link was replaced by a copy).
+- `register` refuses a public key that is not a point or is of small order,
+  and `sign.py`'s verify refuses such keys (a trivial signature would pass).
+- docs/security.md: shared data is power (check table entries' shapes, and
+  let only named bots change who has access to everything), names are
+  names, size before parsing, expected events only, tell the owner of a
+  changed certificate, careful installs, secrets in temporary files.
+
 ### 0.1.3 (2026-11-23)
 
 From the security review of ghostbot, ghostgate and ghostkit:

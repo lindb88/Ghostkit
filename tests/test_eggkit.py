@@ -272,6 +272,89 @@ class TestUpdater(unittest.TestCase):
         result, rehashed, now = self.check()                          # nothing published
         self.assertTrue(result.startswith('failed|could not fetch it'), result)
 
+    # 0.1.4 (review 4): the install step under filesystem failures, permissions, symlinks and planted links
+    NEW = '# eggkit-name: myscript\n# eggkit-version: 1.10\nputs new\n' + '# padding\n' * 300     # ~3 kB
+
+    def rounds(self, n=2, shell=''):
+        """n checks in one Tcl, each with a time limit: a check that never finishes shows as "timeout"."""
+        url = 'file://' + os.path.join(self.pubdir, 'myscript.tcl')
+        script = ('::eggkit::update::register myscript {%s} {%s} %s\n'
+                  'proc done {n r m} { puts "$r|$m"; set ::fin 1 }\n' % (self.installed, url, self.pub))
+        for _ in range(n):
+            script += ('set ::fin 0\n::eggkit::update::check myscript done\n'
+                       'set t [after 5000 {set ::fin 0; puts timeout; set ::fin 2}]\nvwait ::fin\nafter cancel $t\n')
+        head = ('proc putlog {m} {}\nproc utimer {s cmd} {}\nproc rehash {} {}\nproc bgerror {m} { puts "bgerror|$m" }\n'
+                'source {%s}\nsource {%s}\nsource {%s}\n') % tuple(os.path.join(EGG, f) for f in (
+                    'eggkit-ed25519.tcl', 'eggkit-update.tcl', 'eggkit-util.tcl'))
+        cmd = [TCLSH] if not shell else ['bash', '-c', '%s exec "%s"' % (shell, TCLSH)]
+        r = subprocess.run(cmd, input=head + script, capture_output=True, text=True, timeout=60)
+        return [l for l in r.stdout.splitlines() if '|' in l or l == 'timeout']
+
+    @staticmethod
+    def read(path):
+        with open(path) as f:
+            return f.read()
+
+    def left_over(self):
+        return sorted(n for n in os.listdir(os.path.dirname(self.installed)) if n != 'myscript.tcl')
+
+    def test_filesystem_failures_are_told_and_end_the_check(self):
+        self.publish(self.NEW)
+        # the write fails part-way (a file-size limit): told, the check ends, the script intact, nothing left
+        out = self.rounds(shell="trap '' XFSZ; ulimit -f 2;")
+        self.assertEqual(len(out), 2, out)
+        for line in out:
+            self.assertTrue(line.startswith('failed|failed: '), out)       # before: a background error, then silence
+        self.assertIn('puts old', self.read(self.installed))
+        self.assertEqual(self.left_over(), [])
+        # the folder is gone: told each time, too
+        shutil.rmtree(os.path.dirname(self.installed))
+        out = self.rounds()
+        self.assertEqual([l.split('|')[0] for l in out], ['failed', 'failed'], out)
+
+    def test_permissions_are_kept(self):
+        self.publish(self.NEW)
+        os.chmod(self.installed, 0o600)
+        out = self.rounds(1)
+        self.assertTrue(out[0].startswith('updated|'), out)
+        self.assertEqual(os.stat(self.installed).st_mode & 0o777, 0o600)     # before: 0644
+        self.assertIn('puts new', self.read(self.installed))
+        self.assertEqual(self.left_over(), ['myscript.tcl.previous'])
+
+    def test_a_symlinked_script_is_updated_where_it_is(self):
+        self.publish(self.NEW)
+        shared = os.path.join(self.d, 'shared.tcl')
+        os.rename(self.installed, shared)
+        os.symlink(shared, self.installed)
+        out = self.rounds(1)
+        self.assertTrue(out[0].startswith('updated|'), out)
+        self.assertTrue(os.path.islink(self.installed))                       # before: replaced by a copy
+        self.assertIn('puts new', self.read(shared))
+        self.assertIn('puts old', self.read(shared + '.previous'))          # a real copy beside it
+        self.assertEqual(self.left_over(), [])
+
+    def test_a_planted_link_is_not_written_through(self):
+        self.publish(self.NEW.replace('puts new', 'puts evil'), sig='00' * 64)
+        victim = os.path.join(self.d, 'victim.txt')
+        with open(victim, 'w') as f:
+            f.write('precious\n')
+        os.symlink(victim, self.installed + '.eggkit-new')                    # the old fixed temporary name
+        out = self.rounds(1)
+        self.assertTrue(out[0].startswith('failed|refused: the signature'), out)
+        self.assertEqual(self.read(victim), 'precious\n')                   # before: the unsigned download
+        self.assertEqual(self.left_over(), ['myscript.tcl.eggkit-new'])
+
+    def test_weak_keys_are_refused(self):
+        neutral = '01' + '00' * 31
+        out = tcl('puts [catch {::eggkit::update::register a f https://x/a.tcl %s} e]\nputs $e\n'
+                  'puts [catch {::eggkit::update::register b f https://x/b.tcl %s} e]\n'
+                  'puts [catch {::eggkit::update::register c f https://x/c.tcl %s} e]\n'
+                  % (neutral, 'ff' * 32, self.pub)).splitlines()
+        self.assertEqual(out[0], '1')
+        self.assertIn('not a usable public key', out[1])
+        self.assertEqual(out[2:], ['1', '0'])                                 # not a point; a real key is fine
+        self.assertFalse(sign.verify(bytes.fromhex(neutral), b'any file', bytes.fromhex(neutral) + bytes(32)))
+
 
 @unittest.skipUnless(TCLSH, 'no tclsh')
 class TestTclFetch(unittest.TestCase):

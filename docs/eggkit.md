@@ -119,7 +119,13 @@ Before the old file is touched:
 
 Then the old file is kept as `greeter.tcl.previous`, the new one is written
 next to it and renamed into place (a crash halfway never leaves half a
-script), and the bot rehashes. Every step is logged:
+script), and the bot rehashes. Since 0.1.4: the new file is written to a
+temporary file of its own, made new and private (never through a file or
+link already there), and gets the old file's permissions; a script that is
+a symlink is updated where the link points (with `.previous` beside it);
+and a failure on the way (a full disk, a missing folder) is logged and
+reported as `failed`, the temporary file removed, and the next check runs
+as usual. Every step is logged:
 
 ```
 eggupdate: greeter: updated 1.0 -> 1.1 (signature checked by openssl); rehashing

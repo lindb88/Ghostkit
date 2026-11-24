@@ -13,5 +13,5 @@ See docs/irclab.md. Part of ghostkit (MIT license). Python 3.8+, the standard li
 from .client import Line, User, until
 from .server import IRCServer, q_expected
 
-__version__ = '0.1.3'
+__version__ = '0.1.4'
 __all__ = ['IRCServer', 'User', 'Line', 'until', 'q_expected', '__version__']
